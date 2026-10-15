@@ -2,8 +2,10 @@
 
 Self-hosted Strava-ish activity tracker. Loosely inspired by OwnTracks.
 
-- **server/** — Go REST API, SQLite3 storage.
-- **web/** — Node/Express app serving a small SPA that proxies to the API.
+- **server/** — Go REST API, SQLite3 storage; also serves the embedded web
+  SPA (single-binary deploy).
+- **android/** — Native Kotlin/Jetpack Compose client with foreground GPS
+  recording and background sync.
 
 No passwords: users are just selectable identities.
 
@@ -12,7 +14,7 @@ No passwords: users are just selectable identities.
 ```
 cd server
 go mod tidy
-go run . --seed --db traxxx.db     # one-shot: wipes and seeds 15 fake activities
+go run . --seed --db traxxx.db     # one-shot: wipes and seeds 100 fake activities
 go run . --addr :8080 --db traxxx.db
 ```
 
@@ -48,12 +50,44 @@ POST /api/activities
 }
 ```
 
-## Web
+The web SPA lives in `server/web/` (HTML + JS + CSS) and is embedded into the
+Go binary via `//go:embed`. When the server runs it serves the SPA at `/`
+alongside the `/api/*` endpoints, so one binary ships everything. Point a
+browser at `http://localhost:8080/` and pick a user.
+
+## Docker
+
+A `server/Dockerfile` produces a single-binary image (no CGO, pure-Go SQLite).
+SQLite data lives in `/data`, which should be mounted as a volume.
 
 ```
-cd web
-npm install
-API_BASE=http://localhost:8080 npm start   # http://localhost:3000
+make docker-build DOCKER_IMAGE=yourhubuser/traxxx-server DOCKER_TAG=0.1.0
+docker run -d --name traxxx -p 8080:8080 -v traxxx-data:/data \
+  yourhubuser/traxxx-server:0.1.0
 ```
 
-Pick a user, filter activities by date range and/or type.
+## Android
+
+Native Kotlin app (Gradle, Jetpack Compose). Records activities to a local
+Room DB, pushes to the server via a `WorkManager` job, and keeps GPS running
+through a foreground service that survives app kills and reboots. Each upload
+carries a client-generated `client_uuid` so retries are idempotent.
+
+```
+make android-wrapper    # one-time: writes gradle-wrapper.jar (needs system `gradle`)
+make android-dev        # build, install, launch on the connected device/emulator
+make android-logs       # follow service + sync logs
+```
+
+Emulator: the default API base is `http://10.0.2.2:8080` (the host-machine
+loopback as seen from the AVD). Cleartext HTTP is enabled by default; for
+release builds point `apiBase` at an `https://` server.
+
+Build toolchain: JDK 17, Android SDK platform 34, build-tools 34.0.0+.
+Set `ANDROID_HOME` (and `JAVA_HOME` if your `java` isn't 17) before building.
+
+### Top-level `make help`
+
+Shows every target: `server`, `server-run`, `server-seed`, `docker-build`,
+`android-wrapper`, `android-build`, `android-install`, `android-dev`,
+`android-logs`, `android-stop`, `clean`.

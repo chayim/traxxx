@@ -22,10 +22,13 @@ CREATE TABLE IF NOT EXISTS activities (
     stopped_at      DATETIME,
     total_seconds   INTEGER,
     notes           TEXT,
+    client_uuid     TEXT,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities(user_id, activity_date);
 CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(type_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_client_uuid
+    ON activities(client_uuid) WHERE client_uuid IS NOT NULL;
 
 -- GPS points for activities. Only present when a track was recorded.
 CREATE TABLE IF NOT EXISTS track_points (

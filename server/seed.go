@@ -54,8 +54,8 @@ func seedFakeData(db *sql.DB) {
 		"Sunset session", "Weekend wander", "Trail blast", "Pier run",
 	}
 
-	start := time.Now().AddDate(0, 0, -30).Truncate(24 * time.Hour)
-	for i := 0; i < 15; i++ {
+	start := time.Now().AddDate(0, 0, -200).Truncate(24 * time.Hour)
+	for i := 0; i < 100; i++ {
 		typeName := "walk"
 		if rng.Intn(2) == 0 {
 			typeName = "rollerblade"
@@ -137,5 +137,5 @@ func seedFakeData(db *sql.DB) {
 		}
 	}
 
-	log.Println("seed complete: 15 activities, user 'demo'")
+	log.Println("seed complete: 100 activities, user 'demo'")
 }

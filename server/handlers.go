@@ -28,18 +28,22 @@ type ActivityType struct {
 }
 
 type Activity struct {
-	ID            int64      `json:"id"`
-	UserID        int64      `json:"user_id"`
-	TypeID        int64      `json:"type_id"`
-	TypeName      string     `json:"type_name,omitempty"`
-	Name          string     `json:"name"`
-	ActivityDate  string     `json:"activity_date"` // YYYY-MM-DD
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	StoppedAt     *time.Time `json:"stopped_at,omitempty"`
-	TotalSeconds  *int64     `json:"total_seconds,omitempty"`
-	Notes         string     `json:"notes,omitempty"`
-	HasTrack      bool       `json:"has_track"`
-	TrackPointCnt int64      `json:"track_point_count"`
+	ID               int64      `json:"id"`
+	UserID           int64      `json:"user_id"`
+	TypeID           int64      `json:"type_id"`
+	TypeName         string     `json:"type_name,omitempty"`
+	Name             string     `json:"name"`
+	ActivityDate     string     `json:"activity_date"` // YYYY-MM-DD
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	StoppedAt        *time.Time `json:"stopped_at,omitempty"`
+	TotalSeconds     *int64     `json:"total_seconds,omitempty"`
+	Notes            string     `json:"notes,omitempty"`
+	ClientUUID       string     `json:"client_uuid,omitempty"`
+	HasTrack         bool       `json:"has_track"`
+	TrackPointCnt    int64      `json:"track_point_count"`
+	TotalMeters      *float64   `json:"total_meters,omitempty"`
+	AvgSecsPerKm     *float64   `json:"avg_secs_per_km,omitempty"`
+	TypeAvgSecsPerKm *float64   `json:"type_avg_secs_per_km,omitempty"`
 }
 
 type TrackPoint struct {
@@ -61,6 +65,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/activities", s.handleActivities)
 	mux.HandleFunc("/api/activities/", s.handleActivityByID)
 	mux.HandleFunc("/api/overall-pace", s.handleOverallPace)
+
+	// Everything else is the embedded SPA.
+	mux.Handle("/", staticHandler())
 }
 
 // --- helpers ---
@@ -207,6 +214,7 @@ func (s *Server) listActivities(w http.ResponseWriter, r *http.Request) {
 	sqlStr := fmt.Sprintf(`
 		SELECT a.id, a.user_id, a.type_id, t.name, a.name, a.activity_date,
 		       a.started_at, a.stopped_at, a.total_seconds, COALESCE(a.notes,''),
+		       COALESCE(a.client_uuid,''),
 		       (SELECT COUNT(*) FROM track_points p WHERE p.activity_id = a.id) AS pts
 		FROM activities a
 		JOIN activity_types t ON t.id = a.type_id
@@ -225,7 +233,7 @@ func (s *Server) listActivities(w http.ResponseWriter, r *http.Request) {
 		var started, stopped sql.NullTime
 		var total sql.NullInt64
 		if err := rows.Scan(&a.ID, &a.UserID, &a.TypeID, &a.TypeName, &a.Name, &a.ActivityDate,
-			&started, &stopped, &total, &a.Notes, &a.TrackPointCnt); err != nil {
+			&started, &stopped, &total, &a.Notes, &a.ClientUUID, &a.TrackPointCnt); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -241,7 +249,104 @@ func (s *Server) listActivities(w http.ResponseWriter, r *http.Request) {
 		a.HasTrack = a.TrackPointCnt > 0
 		out = append(out, a)
 	}
+	s.annotatePaces(out)
 	writeJSON(w, 200, out)
+}
+
+// annotatePaces fills AvgSecsPerKm / TotalMeters for every activity in `out`
+// that has GPS points, and TypeAvgSecsPerKm for every activity in `out` (based
+// on all other activities in the result set of the same user+type).
+//
+// For a self-hosted install the extra scan is cheap; for larger datasets this
+// is the obvious place to cache a precomputed `avg_secs_per_km` column.
+func (s *Server) annotatePaces(out []Activity) {
+	if len(out) == 0 {
+		return
+	}
+	ids := make([]any, 0, len(out))
+	idx := make(map[int64]int, len(out))
+	for i, a := range out {
+		if a.HasTrack {
+			ids = append(ids, a.ID)
+			idx[a.ID] = i
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	q := fmt.Sprintf(`
+		SELECT activity_id, recorded_at, lat, lon, elevation_m, accuracy_m, speed_mps
+		FROM track_points
+		WHERE activity_id IN (%s)
+		ORDER BY activity_id, recorded_at`, placeholders)
+	rows, err := s.DB.Query(q, ids...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	byAct := make(map[int64][]TrackPoint, len(ids))
+	for rows.Next() {
+		var actID int64
+		var p TrackPoint
+		var ele, acc, spd sql.NullFloat64
+		if err := rows.Scan(&actID, &p.RecordedAt, &p.Lat, &p.Lon, &ele, &acc, &spd); err != nil {
+			return
+		}
+		if ele.Valid {
+			v := ele.Float64
+			p.Elevation = &v
+		}
+		if acc.Valid {
+			v := acc.Float64
+			p.Accuracy = &v
+		}
+		if spd.Valid {
+			v := spd.Float64
+			p.Speed = &v
+		}
+		byAct[actID] = append(byAct[actID], p)
+	}
+	if err := rows.Err(); err != nil {
+		return
+	}
+
+	type typeAgg struct{ secs, kms float64 }
+	byType := map[int64]*typeAgg{}
+	for id, pts := range byAct {
+		splits, meters := computeSplits(pts)
+		if len(splits) == 0 {
+			continue
+		}
+		var sumSecs float64
+		for _, sp := range splits {
+			sumSecs += sp.Seconds
+		}
+		avg := sumSecs / float64(len(splits))
+		i := idx[id]
+		m := meters
+		out[i].TotalMeters = &m
+		out[i].AvgSecsPerKm = &avg
+
+		tid := out[i].TypeID
+		agg := byType[tid]
+		if agg == nil {
+			agg = &typeAgg{}
+			byType[tid] = agg
+		}
+		agg.secs += sumSecs
+		agg.kms += float64(len(splits))
+	}
+
+	for i := range out {
+		if agg := byType[out[i].TypeID]; agg != nil && agg.kms > 0 {
+			v := agg.secs / agg.kms
+			out[i].TypeAvgSecsPerKm = &v
+		}
+	}
 }
 
 type activityInput struct {
@@ -253,6 +358,7 @@ type activityInput struct {
 	StoppedAt    *time.Time   `json:"stopped_at,omitempty"`
 	TotalSeconds *int64       `json:"total_seconds,omitempty"`
 	Notes        string       `json:"notes,omitempty"`
+	ClientUUID   string       `json:"client_uuid,omitempty"`
 	Track        []TrackPoint `json:"track,omitempty"`
 }
 
@@ -272,6 +378,21 @@ func (s *Server) createActivity(w http.ResponseWriter, r *http.Request) {
 		in.TotalSeconds = &d
 	}
 
+	// Idempotency: if client supplied a client_uuid and we already have a row
+	// with it, return the existing record instead of inserting a duplicate.
+	if in.ClientUUID != "" {
+		var existing int64
+		err := s.DB.QueryRow(`SELECT id FROM activities WHERE client_uuid = ? LIMIT 1`, in.ClientUUID).Scan(&existing)
+		if err == nil {
+			s.getActivity(w, r, existing)
+			return
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -280,10 +401,11 @@ func (s *Server) createActivity(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	res, err := tx.Exec(`INSERT INTO activities
-		(user_id, type_id, name, activity_date, started_at, stopped_at, total_seconds, notes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		(user_id, type_id, name, activity_date, started_at, stopped_at, total_seconds, notes, client_uuid)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.UserID, in.TypeID, in.Name, in.ActivityDate,
-		nullTime(in.StartedAt), nullTime(in.StoppedAt), nullInt(in.TotalSeconds), in.Notes)
+		nullTime(in.StartedAt), nullTime(in.StoppedAt), nullInt(in.TotalSeconds), in.Notes,
+		nullString(in.ClientUUID))
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -312,7 +434,7 @@ func (s *Server) createActivity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 201, map[string]int64{"id": id})
+	s.getActivity(w, r, id)
 }
 
 func (s *Server) handleActivityByID(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +473,7 @@ func (s *Server) getActivity(w http.ResponseWriter, r *http.Request, id int64) {
 	row := s.DB.QueryRow(`
 		SELECT a.id, a.user_id, a.type_id, t.name, a.name, a.activity_date,
 		       a.started_at, a.stopped_at, a.total_seconds, COALESCE(a.notes,''),
+		       COALESCE(a.client_uuid,''),
 		       (SELECT COUNT(*) FROM track_points p WHERE p.activity_id = a.id)
 		FROM activities a JOIN activity_types t ON t.id = a.type_id
 		WHERE a.id = ?`, id)
@@ -358,7 +481,7 @@ func (s *Server) getActivity(w http.ResponseWriter, r *http.Request, id int64) {
 	var started, stopped sql.NullTime
 	var total sql.NullInt64
 	err := row.Scan(&a.ID, &a.UserID, &a.TypeID, &a.TypeName, &a.Name, &a.ActivityDate,
-		&started, &stopped, &total, &a.Notes, &a.TrackPointCnt)
+		&started, &stopped, &total, &a.Notes, &a.ClientUUID, &a.TrackPointCnt)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "not found")
 		return
@@ -427,6 +550,7 @@ func (s *Server) getActivityDetail(w http.ResponseWriter, r *http.Request, id in
 	row := s.DB.QueryRow(`
 		SELECT a.id, a.user_id, a.type_id, t.name, a.name, a.activity_date,
 		       a.started_at, a.stopped_at, a.total_seconds, COALESCE(a.notes,''),
+		       COALESCE(a.client_uuid,''),
 		       (SELECT COUNT(*) FROM track_points p WHERE p.activity_id = a.id)
 		FROM activities a JOIN activity_types t ON t.id = a.type_id
 		WHERE a.id = ?`, id)
@@ -434,7 +558,7 @@ func (s *Server) getActivityDetail(w http.ResponseWriter, r *http.Request, id in
 	var started, stopped sql.NullTime
 	var total sql.NullInt64
 	err := row.Scan(&a.ID, &a.UserID, &a.TypeID, &a.TypeName, &a.Name, &a.ActivityDate,
-		&started, &stopped, &total, &a.Notes, &a.TrackPointCnt)
+		&started, &stopped, &total, &a.Notes, &a.ClientUUID, &a.TrackPointCnt)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "not found")
 		return
@@ -559,4 +683,10 @@ func nullFloat(f *float64) any {
 		return nil
 	}
 	return *f
+}
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

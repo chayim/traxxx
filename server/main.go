@@ -29,6 +29,9 @@ func main() {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		log.Fatalf("apply schema: %v", err)
 	}
+	if err := ensureClientUUIDColumn(db); err != nil {
+		log.Fatalf("migrate client_uuid: %v", err)
+	}
 
 	if *seed {
 		seedFakeData(db)
@@ -46,6 +49,44 @@ func main() {
 	}
 	log.Printf("traxxx server listening on %s (db=%s)", *addr, *dbPath)
 	log.Fatal(httpSrv.ListenAndServe())
+}
+
+// ensureClientUUIDColumn adds the activities.client_uuid column on databases
+// created before it was added to schema.sql. SQLite has no "ADD COLUMN IF NOT
+// EXISTS", so we check table_info first. The partial unique index itself is
+// idempotent (IF NOT EXISTS) and already in schema.sql.
+func ensureClientUUIDColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(activities)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	has := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "client_uuid" {
+			has = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE activities ADD COLUMN client_uuid TEXT`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_client_uuid
+			ON activities(client_uuid) WHERE client_uuid IS NOT NULL`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func withLogging(h http.Handler) http.Handler {
