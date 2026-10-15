@@ -1,0 +1,85 @@
+name: Release Artifacts
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    name: Build server (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: server/go.sum
+
+      - name: Build server binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          cd server
+          go build -trimpath -ldflags "-s -w" \
+            -o ../traxxx-server-${{ matrix.goos }}-${{ matrix.goarch }} .
+
+      - name: Upload binary to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "traxxx-server-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            --clobber
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Bootstrap Gradle wrapper if missing
+        working-directory: android
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 8.9 --distribution-type bin
+          fi
+          chmod +x gradlew
+
+      - name: Build debug and release APKs
+        working-directory: android
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APKs
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk traxxx-debug.apk
+          release_apk=$(ls android/app/build/outputs/apk/release/app-release*.apk | head -n1)
+          cp "$release_apk" traxxx-release-unsigned.apk
+
+      - name: Upload APKs to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            traxxx-debug.apk traxxx-release-unsigned.apk --clobber
