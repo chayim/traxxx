@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities(user_id, activity_date);
 CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(type_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_client_uuid
-    ON activities(client_uuid) WHERE client_uuid IS NOT NULL;
+-- idx_activities_client_uuid is created by ensureClientUUIDColumn after the
+-- column has been backfilled on pre-existing databases.
 
 CREATE TABLE IF NOT EXISTS track_points (
     id           BIGSERIAL PRIMARY KEY,
@@ -70,8 +70,7 @@ CREATE TABLE IF NOT EXISTS workouts (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts(user_id, workout_date);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_client_uuid
-    ON workouts(client_uuid) WHERE client_uuid IS NOT NULL;
+-- idx_workouts_client_uuid is created by ensureClientUUIDColumn.
 
 CREATE TABLE IF NOT EXISTS workout_exercises (
     id             BIGSERIAL PRIMARY KEY,

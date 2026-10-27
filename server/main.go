@@ -41,8 +41,11 @@ func main() {
 	if _, err := db.Exec(schema); err != nil {
 		log.Fatalf("apply schema: %v", err)
 	}
-	if err := ensureClientUUIDColumn(db, pg); err != nil {
-		log.Fatalf("migrate client_uuid: %v", err)
+	if err := ensureClientUUIDColumn(db, pg, "activities"); err != nil {
+		log.Fatalf("migrate client_uuid activities: %v", err)
+	}
+	if err := ensureClientUUIDColumn(db, pg, "workouts"); err != nil {
+		log.Fatalf("migrate client_uuid workouts: %v", err)
 	}
 
 	q := dbstore.New(db)
@@ -74,18 +77,19 @@ func openDB(dsn string) (*sql.DB, bool, error) {
 	return db, false, err
 }
 
-// ensureClientUUIDColumn adds the activities.client_uuid column on databases
-// created before it was in the schema. Idempotent on both engines.
-func ensureClientUUIDColumn(db *sql.DB, pg bool) error {
+// ensureClientUUIDColumn adds a client_uuid column on databases created before
+// it was in the schema. Idempotent on both engines.
+func ensureClientUUIDColumn(db *sql.DB, pg bool, table string) error {
+	idx := "idx_" + table + "_client_uuid"
 	if pg {
-		if _, err := db.Exec(`ALTER TABLE activities ADD COLUMN IF NOT EXISTS client_uuid TEXT`); err != nil {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN IF NOT EXISTS client_uuid TEXT`); err != nil {
 			return err
 		}
-		_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_client_uuid
-			ON activities(client_uuid) WHERE client_uuid IS NOT NULL`)
+		_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + idx + `
+			ON ` + table + `(client_uuid) WHERE client_uuid IS NOT NULL`)
 		return err
 	}
-	rows, err := db.Query(`PRAGMA table_info(activities)`)
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return err
 	}
@@ -107,11 +111,11 @@ func ensureClientUUIDColumn(db *sql.DB, pg bool) error {
 		return err
 	}
 	if !has {
-		if _, err := db.Exec(`ALTER TABLE activities ADD COLUMN client_uuid TEXT`); err != nil {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN client_uuid TEXT`); err != nil {
 			return err
 		}
-		if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_client_uuid
-			ON activities(client_uuid) WHERE client_uuid IS NOT NULL`); err != nil {
+		if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ` + idx + `
+			ON ` + table + `(client_uuid) WHERE client_uuid IS NOT NULL`); err != nil {
 			return err
 		}
 	}
