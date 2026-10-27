@@ -63,6 +63,7 @@ type Workout struct {
 	Name        string
 	WorkoutDate string
 	Notes       sql.NullString
+	ClientUuid  sql.NullString
 	CreatedAt   time.Time
 }
 

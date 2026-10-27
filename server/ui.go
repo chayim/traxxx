@@ -62,6 +62,7 @@ var uiTmpl = template.Must(template.New("").Funcs(template.FuncMap{
 func (s *Server) registerUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/ui/activities", s.uiActivities)
+	mux.HandleFunc("/ui/activities/delete", s.uiDeleteActivity)
 	mux.HandleFunc("/ui/activities/", s.uiActivityDetail)
 	mux.HandleFunc("/ui/settings", s.uiSettings)
 	mux.HandleFunc("/ui/workouts", s.uiWorkouts)
@@ -436,6 +437,24 @@ func (s *Server) uiCloneTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/ui/workouts/"+strconv.FormatInt(newID, 10), http.StatusSeeOther)
+}
+
+func (s *Server) uiDeleteActivity(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", 400)
+		return
+	}
+	if err := s.Q.DeleteActivity(ctx, id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/ui/activities", http.StatusSeeOther)
 }
 
 func (s *Server) uiDeleteWorkout(w http.ResponseWriter, r *http.Request) {

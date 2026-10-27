@@ -3,7 +3,14 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <p><a href="/ui/activities">← Back to activities</a></p>
-<h2>{{.Activity.Name}}</h2>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+  <h2 style="margin:0">{{.Activity.Name}}</h2>
+  <form method="post" action="/ui/activities/delete"
+        onsubmit="return confirm('Delete this activity? This cannot be undone.');" style="margin:0">
+    <input type="hidden" name="id" value="{{.Activity.ID}}">
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</div>
 <p class="muted">
   <span class="pill accent">{{.Activity.TypeName}}</span>
   &nbsp;{{dateOnly .Activity.Date}}

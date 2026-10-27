@@ -66,9 +66,12 @@ CREATE TABLE IF NOT EXISTS workouts (
     name         TEXT NOT NULL,
     workout_date TEXT NOT NULL,
     notes        TEXT,
+    client_uuid  TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts(user_id, workout_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_client_uuid
+    ON workouts(client_uuid) WHERE client_uuid IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS workout_exercises (
     id             BIGSERIAL PRIMARY KEY,

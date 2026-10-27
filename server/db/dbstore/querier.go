@@ -28,6 +28,7 @@ type Querier interface {
 	DeleteWorkoutExercisesForWorkout(ctx context.Context, workoutID int64) error
 	DeleteWorkoutTemplate(ctx context.Context, id int64) error
 	FindActivityByClientUUID(ctx context.Context, clientUuid sql.NullString) (int64, error)
+	FindWorkoutByClientUUID(ctx context.Context, clientUuid sql.NullString) (int64, error)
 	FirstUserID(ctx context.Context) (int64, error)
 	GetActivity(ctx context.Context, id int64) (GetActivityRow, error)
 	GetActivityForUI(ctx context.Context, id int64) (GetActivityForUIRow, error)

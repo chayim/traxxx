@@ -55,7 +55,7 @@ class RecordingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Start foreground immediately so Android doesn't ANR us.
-        startForeground(NOTIF_ID, buildNotification("Recording…", "Looking for in-progress run"))
+        startForegroundCompat(NOTIF_ID, buildNotification("Recording…", "Looking for in-progress run"))
         scope.launch {
             val row = repo.inProgress()
             if (row == null) {
@@ -152,13 +152,13 @@ class RecordingService : Service(), LocationListener {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-    private fun startForeground(id: Int, notif: android.app.Notification) {
+    private fun startForegroundCompat(id: Int, notif: android.app.Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceCompat.startForeground(
                 this, id, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
         } else {
-            startForeground(id, notif)
+            super.startForeground(id, notif)
         }
     }
 
@@ -171,6 +171,7 @@ class RecordingService : Service(), LocationListener {
 
     override fun onDestroy() {
         try { lm.removeUpdates(this) } catch (_: Throwable) {}
+        RecordingState.set(null)
         scope.cancel()
         super.onDestroy()
     }

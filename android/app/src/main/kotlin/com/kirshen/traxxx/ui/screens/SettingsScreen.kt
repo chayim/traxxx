@@ -76,7 +76,7 @@ fun SettingsScreen() {
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = pickerOpen) },
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
             )
-            androidx.compose.material3.ExposedDropdownMenu(
+            ExposedDropdownMenu(
                 expanded = pickerOpen,
                 onDismissRequest = { pickerOpen = false },
             ) {

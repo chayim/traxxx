@@ -171,7 +171,8 @@ DELETE FROM template_exercises WHERE template_id = sqlc.arg('template_id');
 
 -- name: ListWorkouts :many
 SELECT id, user_id, template_id, name, workout_date,
-       COALESCE(notes,'') AS notes, created_at FROM workouts
+       COALESCE(notes,'') AS notes,
+       COALESCE(client_uuid,'') AS client_uuid, created_at FROM workouts
 WHERE (CAST(sqlc.narg('user_id') AS BIGINT) IS NULL OR user_id = sqlc.narg('user_id'))
   AND (CAST(sqlc.narg('date_from') AS TEXT) IS NULL OR workout_date >= sqlc.narg('date_from'))
   AND (CAST(sqlc.narg('date_to') AS TEXT) IS NULL OR workout_date <= sqlc.narg('date_to'))
@@ -185,13 +186,17 @@ WHERE w.user_id = sqlc.arg('user_id') ORDER BY w.workout_date DESC, w.id DESC;
 
 -- name: GetWorkout :one
 SELECT id, user_id, template_id, name, workout_date,
-       COALESCE(notes,'') AS notes, created_at FROM workouts WHERE id = sqlc.arg('id');
+       COALESCE(notes,'') AS notes,
+       COALESCE(client_uuid,'') AS client_uuid, created_at FROM workouts WHERE id = sqlc.arg('id');
+
+-- name: FindWorkoutByClientUUID :one
+SELECT id FROM workouts WHERE client_uuid = sqlc.arg('client_uuid') LIMIT 1;
 
 -- name: CreateWorkout :one
-INSERT INTO workouts (user_id, template_id, name, workout_date, notes)
+INSERT INTO workouts (user_id, template_id, name, workout_date, notes, client_uuid)
 VALUES (
   sqlc.arg('user_id'), sqlc.narg('template_id'), sqlc.arg('name'),
-  sqlc.arg('workout_date'), sqlc.narg('notes')
+  sqlc.arg('workout_date'), sqlc.narg('notes'), sqlc.narg('client_uuid')
 ) RETURNING id;
 
 -- name: CreateWorkoutMinimal :one

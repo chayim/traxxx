@@ -11,9 +11,12 @@ import com.kirshen.traxxx.data.entities.ActivityStatus
 import com.kirshen.traxxx.data.entities.TrackPointEntity
 import com.kirshen.traxxx.net.Api
 import com.kirshen.traxxx.net.CreateActivityDto
+import com.kirshen.traxxx.net.CreateWorkoutDto
 import com.kirshen.traxxx.net.CreateTypeDto
 import com.kirshen.traxxx.net.NetModule
 import com.kirshen.traxxx.net.TrackPointDto
+import com.kirshen.traxxx.net.WorkoutExerciseDto
+import com.kirshen.traxxx.net.WorkoutSetDto
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -30,7 +33,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             val typeIds = resolveTypeIds(api)
 
             val pending = repo.pendingToSync()
-            Log.i(TAG, "sync: ${pending.size} pending")
+            Log.i(TAG, "sync: ${pending.size} pending activities")
             var retriable = false
             for (row in pending) {
                 try {
@@ -45,6 +48,44 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                     retriable = true
                 }
             }
+
+            val pendingW = repo.pendingWorkoutsToSync()
+            Log.i(TAG, "sync: ${pendingW.size} pending workouts")
+            for (w in pendingW) {
+                try {
+                    val exs = repo.workoutExercises.forWorkout(w.clientUuid)
+                    val payload = CreateWorkoutDto(
+                        userId = w.userId,
+                        templateId = w.templateServerId,
+                        name = w.name,
+                        workoutDate = w.workoutDate,
+                        notes = w.notes,
+                        clientUuid = w.clientUuid,
+                        exercises = exs.map { ex ->
+                            val sets = repo.workoutSets.forExercise(ex.clientUuid)
+                            WorkoutExerciseDto(
+                                position = ex.position,
+                                name = ex.name,
+                                targetSets = ex.targetSets,
+                                targetReps = ex.targetReps,
+                                targetSeconds = ex.targetSeconds,
+                                sets = sets.map { s ->
+                                    WorkoutSetDto(
+                                        setNumber = s.setNumber, reps = s.reps, seconds = s.seconds,
+                                    )
+                                },
+                            )
+                        },
+                    )
+                    val resp = api.createWorkout(payload)
+                    repo.markWorkoutSynced(w.clientUuid, resp.id)
+                    Log.i(TAG, "synced workout ${w.clientUuid} -> ${resp.id}")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "sync fail for workout ${w.clientUuid}: ${t.message}")
+                    retriable = true
+                }
+            }
+
             if (retriable) Result.retry() else Result.success()
         } catch (t: Throwable) {
             Log.w(TAG, "sync aborted: ${t.message}")
@@ -91,10 +132,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         )
     }
 
-    private fun defaultName(row: ActivityEntity): String {
-        val label = row.typeName.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
-        return "$label ${DATE_FMT.format(Date(row.startedAt))}"
-    }
+    private fun defaultName(row: ActivityEntity): String =
+        com.kirshen.traxxx.data.ActivityType.defaultName(row.typeName, row.startedAt)
 
     companion object {
         private const val TAG = "TraxxxSync"
@@ -127,6 +166,30 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                     notes = dto.notes,
                     status = ActivityStatus.SYNCED,
                 ))
+            }
+        }
+
+        suspend fun refreshWorkouts(ctx: Context) {
+            val prefs = Prefs(ctx).flow.first()
+            val userId = prefs.userId ?: return
+            val api = NetModule.build(prefs.apiBase)
+            val repo = Repository.get(ctx)
+            val list = api.listWorkouts(userId)
+            for (shallow in list) {
+                try {
+                    val detail = api.getWorkout(shallow.id)
+                    repo.upsertWorkoutFromServer(detail)
+                } catch (_: Throwable) { /* skip */ }
+            }
+        }
+
+        suspend fun refreshTemplates(ctx: Context) {
+            val prefs = Prefs(ctx).flow.first()
+            val userId = prefs.userId ?: return
+            val api = NetModule.build(prefs.apiBase)
+            val repo = Repository.get(ctx)
+            for (t in api.listWorkoutTemplates(userId)) {
+                repo.upsertTemplateFromServer(t)
             }
         }
 

@@ -57,6 +57,7 @@ type Workout struct {
 	Name        string            `json:"name"`
 	WorkoutDate string            `json:"workout_date"`
 	Notes       string            `json:"notes,omitempty"`
+	ClientUUID  string            `json:"client_uuid,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	Exercises   []WorkoutExercise `json:"exercises"`
 }
@@ -369,7 +370,8 @@ func (s *Server) listWorkouts(w http.ResponseWriter, r *http.Request) {
 	for _, wk := range rows {
 		w := Workout{
 			ID: wk.ID, UserID: wk.UserID, Name: wk.Name, WorkoutDate: wk.WorkoutDate,
-			Notes: wk.Notes, CreatedAt: wk.CreatedAt, Exercises: []WorkoutExercise{},
+			Notes: wk.Notes, ClientUUID: wk.ClientUuid, CreatedAt: wk.CreatedAt,
+			Exercises: []WorkoutExercise{},
 		}
 		if wk.TemplateID.Valid {
 			v := wk.TemplateID.Int64
@@ -386,6 +388,7 @@ type workoutInput struct {
 	Name        string            `json:"name"`
 	WorkoutDate string            `json:"workout_date"`
 	Notes       string            `json:"notes,omitempty"`
+	ClientUUID  string            `json:"client_uuid,omitempty"`
 	Exercises   []WorkoutExercise `json:"exercises"`
 }
 
@@ -399,6 +402,13 @@ func (s *Server) createWorkout(w http.ResponseWriter, r *http.Request) {
 	if in.UserID == 0 || strings.TrimSpace(in.Name) == "" || in.WorkoutDate == "" {
 		writeErr(w, 400, "user_id, name, workout_date required")
 		return
+	}
+	// Idempotency on client_uuid.
+	if cu := strings.TrimSpace(in.ClientUUID); cu != "" {
+		if existingID, err := s.Q.FindWorkoutByClientUUID(ctx, sql.NullString{String: cu, Valid: true}); err == nil && existingID != 0 {
+			s.getWorkoutDetail(w, r, existingID)
+			return
+		}
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -414,6 +424,7 @@ func (s *Server) createWorkout(w http.ResponseWriter, r *http.Request) {
 	id, err := qTx.CreateWorkout(ctx, dbstore.CreateWorkoutParams{
 		UserID: in.UserID, TemplateID: tplID, Name: strings.TrimSpace(in.Name),
 		WorkoutDate: in.WorkoutDate, Notes: nullStringOrEmpty(in.Notes),
+		ClientUuid: nullStringOrEmpty(in.ClientUUID),
 	})
 	if err != nil {
 		writeErr(w, 400, err.Error())
@@ -515,7 +526,8 @@ func (s *Server) loadWorkout(ctx context.Context, id int64) (Workout, error) {
 	}
 	out := Workout{
 		ID: wk.ID, UserID: wk.UserID, Name: wk.Name, WorkoutDate: wk.WorkoutDate,
-		Notes: wk.Notes, CreatedAt: wk.CreatedAt, Exercises: []WorkoutExercise{},
+		Notes: wk.Notes, ClientUUID: wk.ClientUuid, CreatedAt: wk.CreatedAt,
+		Exercises: []WorkoutExercise{},
 	}
 	if wk.TemplateID.Valid {
 		v := wk.TemplateID.Int64

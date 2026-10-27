@@ -159,10 +159,10 @@ func (q *Queries) CreateUser(ctx context.Context, name string) (int64, error) {
 }
 
 const createWorkout = `-- name: CreateWorkout :one
-INSERT INTO workouts (user_id, template_id, name, workout_date, notes)
+INSERT INTO workouts (user_id, template_id, name, workout_date, notes, client_uuid)
 VALUES (
   $1, $2, $3,
-  $4, $5
+  $4, $5, $6
 ) RETURNING id
 `
 
@@ -172,6 +172,7 @@ type CreateWorkoutParams struct {
 	Name        string
 	WorkoutDate string
 	Notes       sql.NullString
+	ClientUuid  sql.NullString
 }
 
 func (q *Queries) CreateWorkout(ctx context.Context, arg CreateWorkoutParams) (int64, error) {
@@ -181,6 +182,7 @@ func (q *Queries) CreateWorkout(ctx context.Context, arg CreateWorkoutParams) (i
 		arg.Name,
 		arg.WorkoutDate,
 		arg.Notes,
+		arg.ClientUuid,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -340,6 +342,17 @@ func (q *Queries) FindActivityByClientUUID(ctx context.Context, clientUuid sql.N
 	return id, err
 }
 
+const findWorkoutByClientUUID = `-- name: FindWorkoutByClientUUID :one
+SELECT id FROM workouts WHERE client_uuid = $1 LIMIT 1
+`
+
+func (q *Queries) FindWorkoutByClientUUID(ctx context.Context, clientUuid sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, findWorkoutByClientUUID, clientUuid)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const firstUserID = `-- name: FirstUserID :one
 SELECT id FROM users ORDER BY id LIMIT 1
 `
@@ -444,7 +457,8 @@ func (q *Queries) GetTypeIDByName(ctx context.Context, name string) (int64, erro
 
 const getWorkout = `-- name: GetWorkout :one
 SELECT id, user_id, template_id, name, workout_date,
-       COALESCE(notes,'') AS notes, created_at FROM workouts WHERE id = $1
+       COALESCE(notes,'') AS notes,
+       COALESCE(client_uuid,'') AS client_uuid, created_at FROM workouts WHERE id = $1
 `
 
 type GetWorkoutRow struct {
@@ -454,6 +468,7 @@ type GetWorkoutRow struct {
 	Name        string
 	WorkoutDate string
 	Notes       string
+	ClientUuid  string
 	CreatedAt   time.Time
 }
 
@@ -467,6 +482,7 @@ func (q *Queries) GetWorkout(ctx context.Context, id int64) (GetWorkoutRow, erro
 		&i.Name,
 		&i.WorkoutDate,
 		&i.Notes,
+		&i.ClientUuid,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -935,7 +951,8 @@ func (q *Queries) ListWorkoutTemplates(ctx context.Context, userID sql.NullInt64
 const listWorkouts = `-- name: ListWorkouts :many
 
 SELECT id, user_id, template_id, name, workout_date,
-       COALESCE(notes,'') AS notes, created_at FROM workouts
+       COALESCE(notes,'') AS notes,
+       COALESCE(client_uuid,'') AS client_uuid, created_at FROM workouts
 WHERE (CAST($1 AS BIGINT) IS NULL OR user_id = $1)
   AND (CAST($2 AS TEXT) IS NULL OR workout_date >= $2)
   AND (CAST($3 AS TEXT) IS NULL OR workout_date <= $3)
@@ -955,6 +972,7 @@ type ListWorkoutsRow struct {
 	Name        string
 	WorkoutDate string
 	Notes       string
+	ClientUuid  string
 	CreatedAt   time.Time
 }
 
@@ -977,6 +995,7 @@ func (q *Queries) ListWorkouts(ctx context.Context, arg ListWorkoutsParams) ([]L
 			&i.Name,
 			&i.WorkoutDate,
 			&i.Notes,
+			&i.ClientUuid,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

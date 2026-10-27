@@ -62,3 +62,83 @@ data class CreateActivityDto(
     @Json(name = "client_uuid") val clientUuid: String,
     val track: List<TrackPointDto>,
 )
+
+// --- Workouts ---
+
+@JsonClass(generateAdapter = true)
+data class TemplateExerciseDto(
+    val id: Long = 0,
+    @Json(name = "template_id") val templateId: Long = 0,
+    val position: Int,
+    val name: String,
+    @Json(name = "target_sets") val targetSets: Int? = null,
+    @Json(name = "target_reps") val targetReps: Int? = null,
+    @Json(name = "target_seconds") val targetSeconds: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkoutTemplateDto(
+    val id: Long,
+    @Json(name = "user_id") val userId: Long,
+    val name: String,
+    @Json(name = "created_at") val createdAt: String? = null,
+    val exercises: List<TemplateExerciseDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateWorkoutTemplateDto(
+    @Json(name = "user_id") val userId: Long,
+    val name: String,
+    val exercises: List<TemplateExerciseDto>,
+)
+
+@JsonClass(generateAdapter = true)
+data class CloneTemplateDto(
+    @Json(name = "workout_date") val workoutDate: String? = null,
+    val name: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkoutSetDto(
+    val id: Long = 0,
+    @Json(name = "exercise_id") val exerciseId: Long = 0,
+    @Json(name = "set_number") val setNumber: Int,
+    val reps: Int? = null,
+    val seconds: Int? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkoutExerciseDto(
+    val id: Long = 0,
+    @Json(name = "workout_id") val workoutId: Long = 0,
+    val position: Int,
+    val name: String,
+    @Json(name = "target_sets") val targetSets: Int? = null,
+    @Json(name = "target_reps") val targetReps: Int? = null,
+    @Json(name = "target_seconds") val targetSeconds: Int? = null,
+    val sets: List<WorkoutSetDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class WorkoutDto(
+    val id: Long,
+    @Json(name = "user_id") val userId: Long,
+    @Json(name = "template_id") val templateId: Long? = null,
+    val name: String,
+    @Json(name = "workout_date") val workoutDate: String,
+    val notes: String? = null,
+    @Json(name = "client_uuid") val clientUuid: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    val exercises: List<WorkoutExerciseDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateWorkoutDto(
+    @Json(name = "user_id") val userId: Long,
+    @Json(name = "template_id") val templateId: Long? = null,
+    val name: String,
+    @Json(name = "workout_date") val workoutDate: String,
+    val notes: String? = null,
+    @Json(name = "client_uuid") val clientUuid: String,
+    val exercises: List<WorkoutExerciseDto>,
+)
