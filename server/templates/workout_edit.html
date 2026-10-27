@@ -37,4 +37,12 @@
     <a class="btn" href="/ui/workouts">Cancel</a>
   </p>
 </form>
+
+{{if not .Workout.TemplateID}}
+<form method="post" action="/ui/workouts/save-as-template" class="toolbar"
+      onsubmit="return confirm('Save this workout as a new template? Save any edits first.');">
+  <input type="hidden" name="id" value="{{.Workout.ID}}">
+  <button class="btn" type="submit">Save as template</button>
+</form>
+{{end}}
 {{template "footer" .}}

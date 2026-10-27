@@ -22,7 +22,7 @@ help:  ## Show this help
 # ---------- server (Go) ----------
 
 server: ## Build the Go server binary (server/server)
-	cd $(SERVER_DIR) && go mod tidy && go build -o server .
+	cd $(SERVER_DIR) && go mod tidy && go build -o traxxx .
 
 server-run: ## Run the Go server (API_ADDR, DB)
 	cd $(SERVER_DIR) && go run . --addr $(API_ADDR) --db $(DB)

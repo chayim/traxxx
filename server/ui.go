@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"traxxx/server/db/dbstore"
 )
 
 //go:embed templates/*.html templates/fragments/*.html
@@ -84,9 +86,7 @@ func (s *Server) resolveUserID(r *http.Request) (int64, error) {
 	if v := r.URL.Query().Get("user_id"); v != "" {
 		return strconv.ParseInt(v, 10, 64)
 	}
-	// Fallback: first user alphabetically (seed inserts "demo").
-	var id int64
-	err := s.DB.QueryRow(`SELECT id FROM users ORDER BY id LIMIT 1`).Scan(&id)
+	id, err := s.Q.FirstUserID(r.Context())
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -100,21 +100,17 @@ type uiShell struct {
 }
 
 func (s *Server) uiActivities(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	userID, err := s.resolveUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	rows, err := s.DB.Query(`SELECT a.id, a.name, a.activity_date, t.name,
-		a.total_seconds,
-		(SELECT COUNT(*) FROM track_points p WHERE p.activity_id = a.id)
-		FROM activities a JOIN activity_types t ON t.id = a.type_id
-		WHERE a.user_id = ? ORDER BY a.activity_date DESC, a.id DESC LIMIT 200`, userID)
+	rows, err := s.Q.ListActivitiesForUserUI(ctx, userID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer rows.Close()
 	type row struct {
 		ID         int64
 		Name       string
@@ -124,19 +120,14 @@ func (s *Server) uiActivities(w http.ResponseWriter, r *http.Request) {
 		HasTrack   bool
 		PointCount int64
 	}
-	var out []row
-	for rows.Next() {
-		var r row
-		var total sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.Name, &r.Date, &r.TypeName, &total, &r.PointCount); err != nil {
-			http.Error(w, err.Error(), 500)
-			return
+	out := make([]row, 0, len(rows))
+	for _, r := range rows {
+		rr := row{ID: r.ID, Name: r.Name, Date: r.ActivityDate, TypeName: r.TypeName, PointCount: r.PointCount}
+		if r.TotalSeconds.Valid {
+			rr.TotalSecs = r.TotalSeconds.Int64
 		}
-		if total.Valid {
-			r.TotalSecs = total.Int64
-		}
-		r.HasTrack = r.PointCount > 0
-		out = append(out, r)
+		rr.HasTrack = rr.PointCount > 0
+		out = append(out, rr)
 	}
 	render(w, "activities.html", struct {
 		Shell      uiShell
@@ -145,30 +136,14 @@ func (s *Server) uiActivities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiActivityDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/ui/activities/")
 	id, err := strconv.ParseInt(rest, 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	var a struct {
-		ID        int64
-		UserID    int64
-		Name      string
-		Date      string
-		TypeName  string
-		Notes     string
-		TotalSecs int64
-		HasTrack  bool
-	}
-	var total sql.NullInt64
-	var ptCount int64
-	err = s.DB.QueryRow(`SELECT a.id, a.user_id, a.name, a.activity_date, t.name,
-		COALESCE(a.notes,''), a.total_seconds,
-		(SELECT COUNT(*) FROM track_points p WHERE p.activity_id = a.id)
-		FROM activities a JOIN activity_types t ON t.id = a.type_id
-		WHERE a.id = ?`, id).
-		Scan(&a.ID, &a.UserID, &a.Name, &a.Date, &a.TypeName, &a.Notes, &total, &ptCount)
+	row, err := s.Q.GetActivityForUI(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -177,10 +152,23 @@ func (s *Server) uiActivityDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	if total.Valid {
-		a.TotalSecs = total.Int64
+	a := struct {
+		ID        int64
+		UserID    int64
+		Name      string
+		Date      string
+		TypeName  string
+		Notes     string
+		TotalSecs int64
+		HasTrack  bool
+	}{
+		ID: row.ID, UserID: row.UserID, Name: row.Name, Date: row.ActivityDate,
+		TypeName: row.TypeName, Notes: row.Notes,
 	}
-	a.HasTrack = ptCount > 0
+	if row.TotalSeconds.Valid {
+		a.TotalSecs = row.TotalSeconds.Int64
+	}
+	a.HasTrack = row.PointCount > 0
 	render(w, "activity_detail.html", struct {
 		Shell    uiShell
 		Activity any
@@ -188,34 +176,28 @@ func (s *Server) uiActivityDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiWorkouts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	userID, err := s.resolveUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	wkRows, err := s.DB.Query(`SELECT w.id, w.name, w.workout_date,
-		(SELECT COUNT(*) FROM workout_exercises e WHERE e.workout_id = w.id)
-		FROM workouts w
-		WHERE w.user_id = ? ORDER BY w.workout_date DESC, w.id DESC`, userID)
+	rows, err := s.Q.ListWorkoutsForUserUI(ctx, userID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer wkRows.Close()
 	type wkRow struct {
 		ID      int64
 		Name    string
 		Date    string
 		ExCount int
 	}
-	var workouts []wkRow
-	for wkRows.Next() {
-		var r wkRow
-		if err := wkRows.Scan(&r.ID, &r.Name, &r.Date, &r.ExCount); err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		workouts = append(workouts, r)
+	workouts := make([]wkRow, 0, len(rows))
+	for _, r := range rows {
+		workouts = append(workouts, wkRow{
+			ID: r.ID, Name: r.Name, Date: r.WorkoutDate, ExCount: int(r.ExerciseCount),
+		})
 	}
 	render(w, "workouts_list.html", struct {
 		Shell    uiShell
@@ -224,32 +206,25 @@ func (s *Server) uiWorkouts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiSettings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	userID, err := s.resolveUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	tplRows, err := s.DB.Query(`SELECT t.id, t.name,
-		(SELECT COUNT(*) FROM template_exercises e WHERE e.template_id = t.id)
-		FROM workout_templates t WHERE t.user_id = ? ORDER BY t.name`, userID)
+	rows, err := s.Q.ListTemplatesWithExerciseCount(ctx, userID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer tplRows.Close()
 	type tplRow struct {
 		ID      int64
 		Name    string
 		ExCount int
 	}
-	var templates []tplRow
-	for tplRows.Next() {
-		var r tplRow
-		if err := tplRows.Scan(&r.ID, &r.Name, &r.ExCount); err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		templates = append(templates, r)
+	templates := make([]tplRow, 0, len(rows))
+	for _, r := range rows {
+		templates = append(templates, tplRow{ID: r.ID, Name: r.Name, ExCount: int(r.ExerciseCount)})
 	}
 	render(w, "settings.html", struct {
 		Shell     uiShell
@@ -258,12 +233,12 @@ func (s *Server) uiSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiWorkoutByID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/ui/workouts/")
 	if rest == "" || rest == "clone" || rest == "delete" {
 		http.NotFound(w, r)
 		return
 	}
-	// POST to save
 	if r.Method == http.MethodPost {
 		s.uiSaveWorkout(w, r)
 		return
@@ -273,7 +248,7 @@ func (s *Server) uiWorkoutByID(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	wk, err := s.loadWorkout(id)
+	wk, err := s.loadWorkout(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -289,6 +264,7 @@ func (s *Server) uiWorkoutByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiTemplateByID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/ui/templates/workouts/")
 	if rest == "" || rest == "delete" {
 		http.NotFound(w, r)
@@ -313,7 +289,7 @@ func (s *Server) uiTemplateByID(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	tpl, err := s.loadWorkoutTemplate(id)
+	tpl, err := s.loadWorkoutTemplate(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -330,6 +306,7 @@ func (s *Server) uiTemplateByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiSaveTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -345,6 +322,7 @@ func (s *Server) uiSaveTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	qTx := s.Q.WithTx(tx)
 
 	var id int64
 	if rest == "new" {
@@ -352,28 +330,27 @@ func (s *Server) uiSaveTemplate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user_id and name required", 400)
 			return
 		}
-		res, err := tx.Exec(`INSERT INTO workout_templates (user_id, name) VALUES (?, ?)`, userID, name)
+		id, err = qTx.CreateWorkoutTemplate(ctx, dbstore.CreateWorkoutTemplateParams{UserID: userID, Name: name})
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		id, _ = res.LastInsertId()
 	} else {
 		id, err = strconv.ParseInt(rest, 10, 64)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		if _, err := tx.Exec(`UPDATE workout_templates SET name = ? WHERE id = ?`, name, id); err != nil {
+		if err := qTx.UpdateWorkoutTemplate(ctx, dbstore.UpdateWorkoutTemplateParams{Name: name, ID: id}); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		if _, err := tx.Exec(`DELETE FROM template_exercises WHERE template_id = ?`, id); err != nil {
+		if err := qTx.DeleteTemplateExercisesForTemplate(ctx, id); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 	}
-	if err := insertTemplateExercises(tx, id, exs); err != nil {
+	if err := insertTemplateExercises(ctx, qTx, id, exs); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -385,6 +362,7 @@ func (s *Server) uiSaveTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiSaveWorkout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -406,16 +384,18 @@ func (s *Server) uiSaveWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE workouts SET name = ?, workout_date = ?, notes = ? WHERE id = ?`,
-		name, date, notes, id); err != nil {
+	qTx := s.Q.WithTx(tx)
+	if err := qTx.UpdateWorkout(ctx, dbstore.UpdateWorkoutParams{
+		Name: name, WorkoutDate: date, Notes: sql.NullString{String: notes, Valid: notes != ""}, ID: id,
+	}); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if _, err := tx.Exec(`DELETE FROM workout_exercises WHERE workout_id = ?`, id); err != nil {
+	if err := qTx.DeleteWorkoutExercisesForWorkout(ctx, id); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	if err := insertWorkoutExercises(tx, id, exs); err != nil {
+	if err := insertWorkoutExercises(ctx, qTx, id, exs); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -427,6 +407,7 @@ func (s *Server) uiSaveWorkout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiCloneTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -444,12 +425,12 @@ func (s *Server) uiCloneTemplate(w http.ResponseWriter, r *http.Request) {
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
-	tpl, err := s.loadWorkoutTemplate(tplID)
+	tpl, err := s.loadWorkoutTemplate(ctx, tplID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	newID, err := s.cloneTemplateInto(tpl, tpl.Name, date)
+	newID, err := s.cloneTemplateInto(ctx, tpl, tpl.Name, date)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -458,6 +439,7 @@ func (s *Server) uiCloneTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiDeleteWorkout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -467,7 +449,7 @@ func (s *Server) uiDeleteWorkout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", 400)
 		return
 	}
-	if _, err := s.DB.Exec(`DELETE FROM workouts WHERE id = ?`, id); err != nil {
+	if err := s.Q.DeleteWorkout(ctx, id); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -475,6 +457,7 @@ func (s *Server) uiDeleteWorkout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uiDeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -484,7 +467,7 @@ func (s *Server) uiDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", 400)
 		return
 	}
-	if _, err := s.DB.Exec(`DELETE FROM workout_templates WHERE id = ?`, id); err != nil {
+	if err := s.Q.DeleteWorkoutTemplate(ctx, id); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -526,11 +509,6 @@ func (s *Server) fragSetRow(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- form parsing ---
-//
-// Exercise and set rows post their data as parallel arrays:
-//   ex[].name, ex[].sets, ex[].reps, ex[].seconds (for templates)
-//   ex[].name, ex[].sets, ex[].reps, ex[].seconds plus set[I][].reps/seconds (for workouts)
-// Indices are the client-side DOM order; we re-position them sequentially server-side.
 
 func parseExerciseForm(form map[string][]string) []TemplateExercise {
 	names := form["ex_name"]
@@ -557,7 +535,7 @@ func parseWorkoutExerciseForm(form map[string][]string) []WorkoutExercise {
 	setsArr := form["ex_sets"]
 	repsArr := form["ex_reps"]
 	secsArr := form["ex_seconds"]
-	exIdxArr := form["ex_idx"] // original DOM idx used to key set inputs
+	exIdxArr := form["ex_idx"]
 	out := make([]WorkoutExercise, 0, len(names))
 	for i, n := range names {
 		name := strings.TrimSpace(n)

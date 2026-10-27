@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"traxxx/server/db/dbstore"
 )
 
 type TemplateExercise struct {
@@ -73,76 +75,39 @@ func (s *Server) handleWorkoutTemplates(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) listWorkoutTemplates(w http.ResponseWriter, r *http.Request) {
-	where := []string{"1=1"}
-	args := []any{}
-	if v := r.URL.Query().Get("user_id"); v != "" {
-		where = append(where, "user_id = ?")
-		args = append(args, v)
-	}
-	q := fmt.Sprintf(`SELECT id, user_id, name, created_at FROM workout_templates
-		WHERE %s ORDER BY name`, strings.Join(where, " AND "))
-	rows, err := s.DB.Query(q, args...)
+	ctx := r.Context()
+	rows, err := s.Q.ListWorkoutTemplates(ctx, parseNullInt64(r.URL.Query().Get("user_id")))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
-	out := []WorkoutTemplate{}
-	ids := []int64{}
-	byID := map[int64]int{}
-	for rows.Next() {
-		var t WorkoutTemplate
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.CreatedAt); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		t.Exercises = []TemplateExercise{}
-		byID[t.ID] = len(out)
-		ids = append(ids, t.ID)
-		out = append(out, t)
-	}
-	if len(ids) > 0 {
-		exs, err := s.loadTemplateExercises(ids)
+	out := make([]WorkoutTemplate, 0, len(rows))
+	for _, t := range rows {
+		exs, err := s.loadTemplateExercises(ctx, t.ID)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
-		for _, e := range exs {
-			i := byID[e.TemplateID]
-			out[i].Exercises = append(out[i].Exercises, e)
-		}
+		out = append(out, WorkoutTemplate{
+			ID: t.ID, UserID: t.UserID, Name: t.Name, CreatedAt: t.CreatedAt,
+			Exercises: exs,
+		})
 	}
 	writeJSON(w, 200, out)
 }
 
-func (s *Server) loadTemplateExercises(templateIDs []int64) ([]TemplateExercise, error) {
-	if len(templateIDs) == 0 {
-		return nil, nil
-	}
-	ph := strings.Repeat("?,", len(templateIDs))
-	ph = ph[:len(ph)-1]
-	args := make([]any, len(templateIDs))
-	for i, id := range templateIDs {
-		args[i] = id
-	}
-	rows, err := s.DB.Query(fmt.Sprintf(`
-		SELECT id, template_id, position, name, target_sets, target_reps, target_seconds
-		FROM template_exercises WHERE template_id IN (%s) ORDER BY template_id, position`, ph), args...)
+func (s *Server) loadTemplateExercises(ctx context.Context, templateID int64) ([]TemplateExercise, error) {
+	rows, err := s.Q.ListTemplateExercises(ctx, templateID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []TemplateExercise{}
-	for rows.Next() {
-		var e TemplateExercise
-		var sets, reps, secs sql.NullInt64
-		if err := rows.Scan(&e.ID, &e.TemplateID, &e.Position, &e.Name, &sets, &reps, &secs); err != nil {
-			return nil, err
-		}
-		e.TargetSets = nullIntPtr(sets)
-		e.TargetReps = nullIntPtr(reps)
-		e.TargetSeconds = nullIntPtr(secs)
-		out = append(out, e)
+	out := make([]TemplateExercise, 0, len(rows))
+	for _, e := range rows {
+		out = append(out, TemplateExercise{
+			ID: e.ID, TemplateID: e.TemplateID, Position: int(e.Position), Name: e.Name,
+			TargetSets: nullInt64ToIntPtr(e.TargetSets), TargetReps: nullInt64ToIntPtr(e.TargetReps),
+			TargetSeconds: nullInt64ToIntPtr(e.TargetSeconds),
+		})
 	}
 	return out, nil
 }
@@ -154,6 +119,7 @@ type templateInput struct {
 }
 
 func (s *Server) createWorkoutTemplate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var in templateInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, 400, "invalid json")
@@ -169,14 +135,15 @@ func (s *Server) createWorkoutTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO workout_templates (user_id, name) VALUES (?, ?)`,
-		in.UserID, strings.TrimSpace(in.Name))
+	qTx := s.Q.WithTx(tx)
+	id, err := qTx.CreateWorkoutTemplate(ctx, dbstore.CreateWorkoutTemplateParams{
+		UserID: in.UserID, Name: strings.TrimSpace(in.Name),
+	})
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	id, _ := res.LastInsertId()
-	if err := insertTemplateExercises(tx, id, in.Exercises); err != nil {
+	if err := insertTemplateExercises(ctx, qTx, id, in.Exercises); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -184,31 +151,29 @@ func (s *Server) createWorkoutTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.getWorkoutTemplate(w, id)
+	s.getWorkoutTemplate(w, r, id)
 }
 
-func insertTemplateExercises(tx *sql.Tx, templateID int64, exs []TemplateExercise) error {
-	if len(exs) == 0 {
-		return nil
-	}
-	stmt, err := tx.Prepare(`INSERT INTO template_exercises
-		(template_id, position, name, target_sets, target_reps, target_seconds)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
+func insertTemplateExercises(ctx context.Context, q *dbstore.Queries, templateID int64, exs []TemplateExercise) error {
+	pos := 0
 	for i, e := range exs {
 		name := strings.TrimSpace(e.Name)
 		if name == "" {
 			continue
 		}
-		pos := e.Position
-		if pos == 0 {
-			pos = i + 1
+		p := e.Position
+		if p == 0 {
+			p = i + 1
 		}
-		if _, err := stmt.Exec(templateID, pos, name,
-			nullIntFrom(e.TargetSets), nullIntFrom(e.TargetReps), nullIntFrom(e.TargetSeconds)); err != nil {
+		pos = p
+		if err := q.CreateTemplateExercise(ctx, dbstore.CreateTemplateExerciseParams{
+			TemplateID:    templateID,
+			Position:      int64(pos),
+			Name:          name,
+			TargetSets:    intPtrToNullInt64(e.TargetSets),
+			TargetReps:    intPtrToNullInt64(e.TargetReps),
+			TargetSeconds: intPtrToNullInt64(e.TargetSeconds),
+		}); err != nil {
 			return err
 		}
 	}
@@ -216,6 +181,7 @@ func insertTemplateExercises(tx *sql.Tx, templateID int64, exs []TemplateExercis
 }
 
 func (s *Server) handleWorkoutTemplateByID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/api/templates/workouts/")
 	parts := strings.Split(rest, "/")
 	id, err := strconv.ParseInt(parts[0], 10, 64)
@@ -229,11 +195,11 @@ func (s *Server) handleWorkoutTemplateByID(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
-		s.getWorkoutTemplate(w, id)
+		s.getWorkoutTemplate(w, r, id)
 	case http.MethodPut:
 		s.updateWorkoutTemplate(w, r, id)
 	case http.MethodDelete:
-		if _, err := s.DB.Exec(`DELETE FROM workout_templates WHERE id = ?`, id); err != nil {
+		if err := s.Q.DeleteWorkoutTemplate(ctx, id); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -243,8 +209,9 @@ func (s *Server) handleWorkoutTemplateByID(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *Server) getWorkoutTemplate(w http.ResponseWriter, id int64) {
-	t, err := s.loadWorkoutTemplate(id)
+func (s *Server) getWorkoutTemplate(w http.ResponseWriter, r *http.Request, id int64) {
+	ctx := r.Context()
+	t, err := s.loadWorkoutTemplate(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "not found")
 		return
@@ -256,25 +223,23 @@ func (s *Server) getWorkoutTemplate(w http.ResponseWriter, id int64) {
 	writeJSON(w, 200, t)
 }
 
-func (s *Server) loadWorkoutTemplate(id int64) (WorkoutTemplate, error) {
-	var t WorkoutTemplate
-	err := s.DB.QueryRow(`SELECT id, user_id, name, created_at FROM workout_templates WHERE id = ?`, id).
-		Scan(&t.ID, &t.UserID, &t.Name, &t.CreatedAt)
+func (s *Server) loadWorkoutTemplate(ctx context.Context, id int64) (WorkoutTemplate, error) {
+	t, err := s.Q.GetWorkoutTemplate(ctx, id)
 	if err != nil {
-		return t, err
+		return WorkoutTemplate{}, err
 	}
-	exs, err := s.loadTemplateExercises([]int64{id})
+	exs, err := s.loadTemplateExercises(ctx, id)
 	if err != nil {
-		return t, err
+		return WorkoutTemplate{}, err
 	}
-	t.Exercises = exs
-	if t.Exercises == nil {
-		t.Exercises = []TemplateExercise{}
-	}
-	return t, nil
+	return WorkoutTemplate{
+		ID: t.ID, UserID: t.UserID, Name: t.Name, CreatedAt: t.CreatedAt,
+		Exercises: exs,
+	}, nil
 }
 
 func (s *Server) updateWorkoutTemplate(w http.ResponseWriter, r *http.Request, id int64) {
+	ctx := r.Context()
 	var in templateInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, 400, "invalid json")
@@ -286,18 +251,20 @@ func (s *Server) updateWorkoutTemplate(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	defer tx.Rollback()
+	qTx := s.Q.WithTx(tx)
 	if strings.TrimSpace(in.Name) != "" {
-		if _, err := tx.Exec(`UPDATE workout_templates SET name = ? WHERE id = ?`,
-			strings.TrimSpace(in.Name), id); err != nil {
+		if err := qTx.UpdateWorkoutTemplate(ctx, dbstore.UpdateWorkoutTemplateParams{
+			Name: strings.TrimSpace(in.Name), ID: id,
+		}); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM template_exercises WHERE template_id = ?`, id); err != nil {
+	if err := qTx.DeleteTemplateExercisesForTemplate(ctx, id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if err := insertTemplateExercises(tx, id, in.Exercises); err != nil {
+	if err := insertTemplateExercises(ctx, qTx, id, in.Exercises); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -305,10 +272,11 @@ func (s *Server) updateWorkoutTemplate(w http.ResponseWriter, r *http.Request, i
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.getWorkoutTemplate(w, id)
+	s.getWorkoutTemplate(w, r, id)
 }
 
 func (s *Server) cloneWorkoutTemplate(w http.ResponseWriter, r *http.Request, id int64) {
+	ctx := r.Context()
 	var in struct {
 		WorkoutDate string `json:"workout_date"`
 		Name        string `json:"name"`
@@ -317,7 +285,7 @@ func (s *Server) cloneWorkoutTemplate(w http.ResponseWriter, r *http.Request, id
 	if in.WorkoutDate == "" {
 		in.WorkoutDate = time.Now().Format("2006-01-02")
 	}
-	tpl, err := s.loadWorkoutTemplate(id)
+	tpl, err := s.loadWorkoutTemplate(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "template not found")
 		return
@@ -330,36 +298,39 @@ func (s *Server) cloneWorkoutTemplate(w http.ResponseWriter, r *http.Request, id
 	if name == "" {
 		name = tpl.Name
 	}
-	newID, err := s.cloneTemplateInto(tpl, name, in.WorkoutDate)
+	newID, err := s.cloneTemplateInto(ctx, tpl, name, in.WorkoutDate)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.getWorkoutDetail(w, newID)
+	s.getWorkoutDetail(w, r, newID)
 }
 
-func (s *Server) cloneTemplateInto(tpl WorkoutTemplate, name, date string) (int64, error) {
+func (s *Server) cloneTemplateInto(ctx context.Context, tpl WorkoutTemplate, name, date string) (int64, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO workouts (user_id, template_id, name, workout_date) VALUES (?, ?, ?, ?)`,
-		tpl.UserID, tpl.ID, name, date)
+	qTx := s.Q.WithTx(tx)
+	wid, err := qTx.CreateWorkoutMinimal(ctx, dbstore.CreateWorkoutMinimalParams{
+		UserID:      tpl.UserID,
+		TemplateID:  sql.NullInt64{Int64: tpl.ID, Valid: true},
+		Name:        name,
+		WorkoutDate: date,
+	})
 	if err != nil {
 		return 0, err
 	}
-	wid, _ := res.LastInsertId()
-	stmt, err := tx.Prepare(`INSERT INTO workout_exercises
-		(workout_id, position, name, target_sets, target_reps, target_seconds)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer stmt.Close()
 	for _, e := range tpl.Exercises {
-		if _, err := stmt.Exec(wid, e.Position, e.Name,
-			nullIntFrom(e.TargetSets), nullIntFrom(e.TargetReps), nullIntFrom(e.TargetSeconds)); err != nil {
+		if _, err := qTx.CreateWorkoutExercise(ctx, dbstore.CreateWorkoutExerciseParams{
+			WorkoutID:     wid,
+			Position:      int64(e.Position),
+			Name:          e.Name,
+			TargetSets:    intPtrToNullInt64(e.TargetSets),
+			TargetReps:    intPtrToNullInt64(e.TargetReps),
+			TargetSeconds: intPtrToNullInt64(e.TargetSeconds),
+		}); err != nil {
 			return 0, err
 		}
 	}
@@ -383,45 +354,28 @@ func (s *Server) handleWorkouts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listWorkouts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	q := r.URL.Query()
-	where := []string{"1=1"}
-	args := []any{}
-	if v := q.Get("user_id"); v != "" {
-		where = append(where, "user_id = ?")
-		args = append(args, v)
-	}
-	if v := q.Get("from"); v != "" {
-		where = append(where, "workout_date >= ?")
-		args = append(args, v)
-	}
-	if v := q.Get("to"); v != "" {
-		where = append(where, "workout_date <= ?")
-		args = append(args, v)
-	}
-	sqlStr := fmt.Sprintf(`SELECT id, user_id, template_id, name, workout_date,
-		COALESCE(notes,''), created_at FROM workouts
-		WHERE %s ORDER BY workout_date DESC, id DESC`, strings.Join(where, " AND "))
-	rows, err := s.DB.Query(sqlStr, args...)
+	rows, err := s.Q.ListWorkouts(ctx, dbstore.ListWorkoutsParams{
+		UserID:   parseNullInt64(q.Get("user_id")),
+		DateFrom: nullStringOrEmpty(q.Get("from")),
+		DateTo:   nullStringOrEmpty(q.Get("to")),
+	})
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
-	out := []Workout{}
-	for rows.Next() {
-		var wk Workout
-		var tplID sql.NullInt64
-		if err := rows.Scan(&wk.ID, &wk.UserID, &tplID, &wk.Name, &wk.WorkoutDate,
-			&wk.Notes, &wk.CreatedAt); err != nil {
-			writeErr(w, 500, err.Error())
-			return
+	out := make([]Workout, 0, len(rows))
+	for _, wk := range rows {
+		w := Workout{
+			ID: wk.ID, UserID: wk.UserID, Name: wk.Name, WorkoutDate: wk.WorkoutDate,
+			Notes: wk.Notes, CreatedAt: wk.CreatedAt, Exercises: []WorkoutExercise{},
 		}
-		if tplID.Valid {
-			v := tplID.Int64
-			wk.TemplateID = &v
+		if wk.TemplateID.Valid {
+			v := wk.TemplateID.Int64
+			w.TemplateID = &v
 		}
-		wk.Exercises = []WorkoutExercise{}
-		out = append(out, wk)
+		out = append(out, w)
 	}
 	writeJSON(w, 200, out)
 }
@@ -436,6 +390,7 @@ type workoutInput struct {
 }
 
 func (s *Server) createWorkout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var in workoutInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, 400, "invalid json")
@@ -451,19 +406,20 @@ func (s *Server) createWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	var tplID any
+	qTx := s.Q.WithTx(tx)
+	var tplID sql.NullInt64
 	if in.TemplateID != nil {
-		tplID = *in.TemplateID
+		tplID = sql.NullInt64{Int64: *in.TemplateID, Valid: true}
 	}
-	res, err := tx.Exec(`INSERT INTO workouts (user_id, template_id, name, workout_date, notes)
-		VALUES (?, ?, ?, ?, ?)`,
-		in.UserID, tplID, strings.TrimSpace(in.Name), in.WorkoutDate, nullString(in.Notes))
+	id, err := qTx.CreateWorkout(ctx, dbstore.CreateWorkoutParams{
+		UserID: in.UserID, TemplateID: tplID, Name: strings.TrimSpace(in.Name),
+		WorkoutDate: in.WorkoutDate, Notes: nullStringOrEmpty(in.Notes),
+	})
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	id, _ := res.LastInsertId()
-	if err := insertWorkoutExercises(tx, id, in.Exercises); err != nil {
+	if err := insertWorkoutExercises(ctx, qTx, id, in.Exercises); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -471,26 +427,10 @@ func (s *Server) createWorkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.getWorkoutDetail(w, id)
+	s.getWorkoutDetail(w, r, id)
 }
 
-func insertWorkoutExercises(tx *sql.Tx, workoutID int64, exs []WorkoutExercise) error {
-	if len(exs) == 0 {
-		return nil
-	}
-	exStmt, err := tx.Prepare(`INSERT INTO workout_exercises
-		(workout_id, position, name, target_sets, target_reps, target_seconds)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer exStmt.Close()
-	setStmt, err := tx.Prepare(`INSERT INTO workout_sets
-		(exercise_id, set_number, reps, seconds) VALUES (?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer setStmt.Close()
+func insertWorkoutExercises(ctx context.Context, q *dbstore.Queries, workoutID int64, exs []WorkoutExercise) error {
 	for i, e := range exs {
 		name := strings.TrimSpace(e.Name)
 		if name == "" {
@@ -500,18 +440,24 @@ func insertWorkoutExercises(tx *sql.Tx, workoutID int64, exs []WorkoutExercise) 
 		if pos == 0 {
 			pos = i + 1
 		}
-		res, err := exStmt.Exec(workoutID, pos, name,
-			nullIntFrom(e.TargetSets), nullIntFrom(e.TargetReps), nullIntFrom(e.TargetSeconds))
+		eid, err := q.CreateWorkoutExercise(ctx, dbstore.CreateWorkoutExerciseParams{
+			WorkoutID: workoutID, Position: int64(pos), Name: name,
+			TargetSets: intPtrToNullInt64(e.TargetSets),
+			TargetReps: intPtrToNullInt64(e.TargetReps),
+			TargetSeconds: intPtrToNullInt64(e.TargetSeconds),
+		})
 		if err != nil {
 			return err
 		}
-		eid, _ := res.LastInsertId()
 		for j, st := range e.Sets {
 			num := st.SetNumber
 			if num == 0 {
 				num = j + 1
 			}
-			if _, err := setStmt.Exec(eid, num, nullIntFrom(st.Reps), nullIntFrom(st.Seconds)); err != nil {
+			if err := q.CreateWorkoutSet(ctx, dbstore.CreateWorkoutSetParams{
+				ExerciseID: eid, SetNumber: int64(num),
+				Reps: intPtrToNullInt64(st.Reps), Seconds: intPtrToNullInt64(st.Seconds),
+			}); err != nil {
 				return err
 			}
 		}
@@ -520,6 +466,7 @@ func insertWorkoutExercises(tx *sql.Tx, workoutID int64, exs []WorkoutExercise) 
 }
 
 func (s *Server) handleWorkoutByID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/api/workouts/")
 	parts := strings.Split(rest, "/")
 	id, err := strconv.ParseInt(parts[0], 10, 64)
@@ -528,16 +475,16 @@ func (s *Server) handleWorkoutByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "detail" {
-		s.getWorkoutDetail(w, id)
+		s.getWorkoutDetail(w, r, id)
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		s.getWorkoutDetail(w, id)
+		s.getWorkoutDetail(w, r, id)
 	case http.MethodPut:
 		s.updateWorkout(w, r, id)
 	case http.MethodDelete:
-		if _, err := s.DB.Exec(`DELETE FROM workouts WHERE id = ?`, id); err != nil {
+		if err := s.Q.DeleteWorkout(ctx, id); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -547,8 +494,9 @@ func (s *Server) handleWorkoutByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) getWorkoutDetail(w http.ResponseWriter, id int64) {
-	wk, err := s.loadWorkout(id)
+func (s *Server) getWorkoutDetail(w http.ResponseWriter, r *http.Request, id int64) {
+	ctx := r.Context()
+	wk, err := s.loadWorkout(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "not found")
 		return
@@ -560,74 +508,47 @@ func (s *Server) getWorkoutDetail(w http.ResponseWriter, id int64) {
 	writeJSON(w, 200, wk)
 }
 
-func (s *Server) loadWorkout(id int64) (Workout, error) {
-	var wk Workout
-	var tplID sql.NullInt64
-	err := s.DB.QueryRow(`SELECT id, user_id, template_id, name, workout_date,
-		COALESCE(notes,''), created_at FROM workouts WHERE id = ?`, id).
-		Scan(&wk.ID, &wk.UserID, &tplID, &wk.Name, &wk.WorkoutDate, &wk.Notes, &wk.CreatedAt)
+func (s *Server) loadWorkout(ctx context.Context, id int64) (Workout, error) {
+	wk, err := s.Q.GetWorkout(ctx, id)
 	if err != nil {
-		return wk, err
+		return Workout{}, err
 	}
-	if tplID.Valid {
-		v := tplID.Int64
-		wk.TemplateID = &v
+	out := Workout{
+		ID: wk.ID, UserID: wk.UserID, Name: wk.Name, WorkoutDate: wk.WorkoutDate,
+		Notes: wk.Notes, CreatedAt: wk.CreatedAt, Exercises: []WorkoutExercise{},
 	}
-	wk.Exercises = []WorkoutExercise{}
-
-	exRows, err := s.DB.Query(`SELECT id, workout_id, position, name,
-		target_sets, target_reps, target_seconds
-		FROM workout_exercises WHERE workout_id = ? ORDER BY position`, id)
+	if wk.TemplateID.Valid {
+		v := wk.TemplateID.Int64
+		out.TemplateID = &v
+	}
+	exRows, err := s.Q.ListWorkoutExercises(ctx, id)
 	if err != nil {
-		return wk, err
+		return out, err
 	}
-	byID := map[int64]int{}
-	for exRows.Next() {
-		var e WorkoutExercise
-		var sets, reps, secs sql.NullInt64
-		if err := exRows.Scan(&e.ID, &e.WorkoutID, &e.Position, &e.Name, &sets, &reps, &secs); err != nil {
-			exRows.Close()
-			return wk, err
+	for _, e := range exRows {
+		ex := WorkoutExercise{
+			ID: e.ID, WorkoutID: e.WorkoutID, Position: int(e.Position), Name: e.Name,
+			TargetSets: nullInt64ToIntPtr(e.TargetSets), TargetReps: nullInt64ToIntPtr(e.TargetReps),
+			TargetSeconds: nullInt64ToIntPtr(e.TargetSeconds),
+			Sets:          []WorkoutSet{},
 		}
-		e.TargetSets = nullIntPtr(sets)
-		e.TargetReps = nullIntPtr(reps)
-		e.TargetSeconds = nullIntPtr(secs)
-		e.Sets = []WorkoutSet{}
-		byID[e.ID] = len(wk.Exercises)
-		wk.Exercises = append(wk.Exercises, e)
-	}
-	exRows.Close()
-
-	if len(wk.Exercises) == 0 {
-		return wk, nil
-	}
-	ids := make([]any, 0, len(wk.Exercises))
-	for _, e := range wk.Exercises {
-		ids = append(ids, e.ID)
-	}
-	ph := strings.Repeat("?,", len(ids))
-	ph = ph[:len(ph)-1]
-	setRows, err := s.DB.Query(fmt.Sprintf(`SELECT id, exercise_id, set_number, reps, seconds
-		FROM workout_sets WHERE exercise_id IN (%s) ORDER BY exercise_id, set_number`, ph), ids...)
-	if err != nil {
-		return wk, err
-	}
-	defer setRows.Close()
-	for setRows.Next() {
-		var st WorkoutSet
-		var reps, secs sql.NullInt64
-		if err := setRows.Scan(&st.ID, &st.ExerciseID, &st.SetNumber, &reps, &secs); err != nil {
-			return wk, err
+		setRows, err := s.Q.ListWorkoutSetsForExercise(ctx, e.ID)
+		if err != nil {
+			return out, err
 		}
-		st.Reps = nullIntPtr(reps)
-		st.Seconds = nullIntPtr(secs)
-		i := byID[st.ExerciseID]
-		wk.Exercises[i].Sets = append(wk.Exercises[i].Sets, st)
+		for _, st := range setRows {
+			ex.Sets = append(ex.Sets, WorkoutSet{
+				ID: st.ID, ExerciseID: st.ExerciseID, SetNumber: int(st.SetNumber),
+				Reps: nullInt64ToIntPtr(st.Reps), Seconds: nullInt64ToIntPtr(st.Seconds),
+			})
+		}
+		out.Exercises = append(out.Exercises, ex)
 	}
-	return wk, nil
+	return out, nil
 }
 
 func (s *Server) updateWorkout(w http.ResponseWriter, r *http.Request, id int64) {
+	ctx := r.Context()
 	var in workoutInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, 400, "invalid json")
@@ -639,22 +560,20 @@ func (s *Server) updateWorkout(w http.ResponseWriter, r *http.Request, id int64)
 		return
 	}
 	defer tx.Rollback()
+	qTx := s.Q.WithTx(tx)
 	if strings.TrimSpace(in.Name) != "" || in.WorkoutDate != "" || in.Notes != "" {
-		if _, err := tx.Exec(`UPDATE workouts SET
-			name = COALESCE(NULLIF(?, ''), name),
-			workout_date = COALESCE(NULLIF(?, ''), workout_date),
-			notes = ?
-			WHERE id = ?`,
-			strings.TrimSpace(in.Name), in.WorkoutDate, in.Notes, id); err != nil {
+		if err := qTx.UpdateWorkoutPartial(ctx, dbstore.UpdateWorkoutPartialParams{
+			Name: strings.TrimSpace(in.Name), WorkoutDate: in.WorkoutDate, Notes: nullStringOrEmpty(in.Notes), ID: id,
+		}); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM workout_exercises WHERE workout_id = ?`, id); err != nil {
+	if err := qTx.DeleteWorkoutExercisesForWorkout(ctx, id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if err := insertWorkoutExercises(tx, id, in.Exercises); err != nil {
+	if err := insertWorkoutExercises(ctx, qTx, id, in.Exercises); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -662,19 +581,19 @@ func (s *Server) updateWorkout(w http.ResponseWriter, r *http.Request, id int64)
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.getWorkoutDetail(w, id)
+	s.getWorkoutDetail(w, r, id)
 }
 
 // --- small helpers ---
 
-func nullIntFrom(p *int) any {
+func intPtrToNullInt64(p *int) sql.NullInt64 {
 	if p == nil {
-		return nil
+		return sql.NullInt64{}
 	}
-	return *p
+	return sql.NullInt64{Int64: int64(*p), Valid: true}
 }
 
-func nullIntPtr(n sql.NullInt64) *int {
+func nullInt64ToIntPtr(n sql.NullInt64) *int {
 	if !n.Valid {
 		return nil
 	}

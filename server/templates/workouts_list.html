@@ -1,7 +1,7 @@
 {{template "header" .}}
 <div class="page-head">
   <h2>Workouts</h2>
-  <a class="btn primary" href="/ui/templates/workouts/new">+ New template</a>
+  <a class="btn primary" href="/ui/workouts/new">+ New workout</a>
 </div>
 
 {{if .Workouts}}
@@ -17,7 +17,7 @@
     <form method="post" action="/ui/workouts/delete" class="inline-form"
           onsubmit="return confirm('Delete this workout?');">
       <input type="hidden" name="id" value="{{.ID}}">
-      <button class="danger" type="submit">Delete</button>
+      <button class="danger" type="submit">×</button>
     </form>
   </td>
 </tr>

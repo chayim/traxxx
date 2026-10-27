@@ -1,0 +1,40 @@
+{{template "header" .}}
+<h2>New workout</h2>
+
+<div class="card">
+  <h3>From a template</h3>
+  {{if .Templates}}
+  <form method="post" action="/ui/workouts/clone" class="toolbar">
+    <label>Template<br>
+      <select name="template_id" required>
+        {{range .Templates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Date<br>
+      <input type="date" name="workout_date" value="{{.Today}}">
+    </label>
+    <button class="primary" type="submit">Start</button>
+  </form>
+  {{else}}
+  <p class="muted">No templates yet. Create one from <a href="/ui/settings">Settings</a>, or start a blank workout below.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <h3>Blank workout</h3>
+  <p class="muted">Build it as you go. Once saved, you can turn it into a template.</p>
+  <form method="post" action="/ui/workouts/new" class="toolbar">
+    <label>Name<br>
+      <input type="text" name="name" placeholder="e.g. Push day" required>
+    </label>
+    <label>Date<br>
+      <input type="date" name="workout_date" value="{{.Today}}">
+    </label>
+    <button class="primary" type="submit">Create</button>
+  </form>
+</div>
+
+<p class="toolbar">
+  <a class="btn" href="/ui/workouts">Cancel</a>
+</p>
+{{template "footer" .}}

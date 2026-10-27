@@ -1,0 +1,16 @@
+version: "2"
+# Generate once (postgresql engine). Both pgx and modernc.org/sqlite accept the
+# `$N` positional placeholders sqlc emits, so the generated code works against
+# either driver at runtime. The query file is written to stay within SQL that
+# both engines execute identically.
+sql:
+  - engine: postgresql
+    schema: db/schema.pg.sql
+    queries: db/queries.sql
+    gen:
+      go:
+        package: dbstore
+        out: db/dbstore
+        sql_package: database/sql
+        emit_interface: true
+        emit_empty_slices: true
