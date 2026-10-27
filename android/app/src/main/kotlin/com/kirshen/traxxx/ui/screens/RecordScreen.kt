@@ -70,6 +70,8 @@ fun RecordScreen() {
     ) {
         Text("Record", style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.Start))
 
+        Spacer(Modifier.weight(1f))
+
         Box(Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { menuOpen = true },
@@ -115,8 +117,6 @@ fun RecordScreen() {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-
         Button(
             onClick = {
                 scope.launch {
@@ -139,5 +139,7 @@ fun RecordScreen() {
                 Text("START", fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
+
+        Spacer(Modifier.weight(1f))
     }
 }

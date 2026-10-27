@@ -3,6 +3,8 @@ package com.kirshen.traxxx.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -76,7 +78,7 @@ fun ActiveRecordingScreen() {
     val label = ActivityType.fromName(row.typeName)?.label ?: row.typeName
     val elapsed = (now - row.startedAt).coerceAtLeast(0) / 1000
 
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("$label · recording", style = MaterialTheme.typography.titleLarge)
         Text(
             formatElapsed(elapsed),
@@ -120,6 +122,8 @@ fun ActiveRecordingScreen() {
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Stop & save") }
+
+        Spacer(Modifier.weight(1f))
 
         OutlinedButton(
             onClick = { confirmDiscard = true },

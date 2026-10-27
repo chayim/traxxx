@@ -72,7 +72,7 @@ fun Nav() {
     Scaffold(
         bottomBar = {
             NavigationBar {
-                listOf(Dest.Record, Dest.History, Dest.Workouts, Dest.Settings).forEach { d ->
+                listOf(Dest.Record, Dest.Workouts, Dest.History, Dest.Settings).forEach { d ->
                     NavigationBarItem(
                         icon = d.icon,
                         label = { Text(d.label) },

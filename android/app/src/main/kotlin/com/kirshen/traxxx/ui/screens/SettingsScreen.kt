@@ -30,6 +30,7 @@ import com.kirshen.traxxx.data.Prefs
 import com.kirshen.traxxx.net.NetModule
 import com.kirshen.traxxx.net.UserDto
 import com.kirshen.traxxx.sync.SyncScheduler
+import com.kirshen.traxxx.sync.SyncWorker
 import com.kirshen.traxxx.data.Repository
 import kotlinx.coroutines.launch
 
@@ -46,6 +47,7 @@ fun SettingsScreen() {
     var users by remember { mutableStateOf<List<UserDto>>(emptyList()) }
     var pickerOpen by remember { mutableStateOf(false) }
     var pickedName by remember { mutableStateOf("") }
+    var syncStatus by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(snap) {
         snap?.let {
@@ -98,15 +100,31 @@ fun SettingsScreen() {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { SyncScheduler.enqueueOneShot(ctx) }, modifier = Modifier.weight(1f)) {
-                Text("Flush queue now")
-            }
+            OutlinedButton(
+                onClick = {
+                    SyncScheduler.enqueueOneShot(ctx)
+                    scope.launch {
+                        syncStatus = "syncing…"
+                        val ok = runCatching {
+                            SyncWorker.refreshHistory(ctx)
+                            SyncWorker.refreshWorkouts(ctx)
+                            SyncWorker.refreshTemplates(ctx)
+                        }.isSuccess
+                        syncStatus = if (ok) "synced" else "offline — queued"
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("Force sync") }
             OutlinedButton(onClick = { scope.launch { prefs.clearUser() } }, modifier = Modifier.weight(1f)) {
                 Text("Switch user…")
             }
         }
 
         Text("Pending uploads: $pending", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        syncStatus?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
         Text(
             "Pending activities are stored on-device and uploaded whenever the server is reachable.",
             style = MaterialTheme.typography.bodySmall,
