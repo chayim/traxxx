@@ -1,0 +1,34 @@
+{{template "header" .}}
+<h2>{{if .IsNew}}New template{{else}}Edit template: {{.Template.Name}}{{end}}</h2>
+
+<form method="post" action="{{if .IsNew}}/ui/templates/workouts/new{{else}}/ui/templates/workouts/{{.Template.ID}}{{end}}">
+  <input type="hidden" name="user_id" value="{{.Shell.UserID}}">
+  <p>
+    <label>Name<br>
+      <input type="text" name="name" value="{{.Template.Name}}" required
+             style="max-width: 400px;">
+    </label>
+  </p>
+
+  <h3>Exercises</h3>
+  <div class="row col-label">
+    <span>Name</span><span>Sets</span><span>Reps</span><span>Seconds</span><span></span>
+  </div>
+  <div id="exercise-rows">
+    {{range $i, $e := .Template.Exercises}}
+      {{template "exercise_row.html" (dict "Idx" $i "Exercise" $e)}}
+    {{end}}
+  </div>
+  <p class="toolbar">
+    <button type="button"
+            hx-get="/ui/fragments/exercise-row"
+            hx-target="#exercise-rows"
+            hx-swap="beforeend">+ Add exercise</button>
+  </p>
+
+  <p class="toolbar">
+    <button type="submit" class="primary">Save template</button>
+    <a class="btn" href="/ui/settings">Cancel</a>
+  </p>
+</form>
+{{template "footer" .}}

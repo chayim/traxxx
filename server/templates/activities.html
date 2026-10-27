@@ -1,0 +1,20 @@
+{{template "header" .}}
+<h2>Activities</h2>
+{{if .Activities}}
+<table>
+<thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Duration</th></tr></thead>
+<tbody>
+{{range .Activities}}
+<tr>
+  <td>{{dateOnly .Date}}</td>
+  <td><a href="/ui/activities/{{.ID}}">{{.Name}}</a></td>
+  <td>{{.TypeName}}</td>
+  <td>{{hms .TotalSecs}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="muted">No activities yet. Run <code>./server -seed</code> to populate sample data.</p>
+{{end}}
+{{template "footer" .}}

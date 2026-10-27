@@ -66,8 +66,13 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/activities/", s.handleActivityByID)
 	mux.HandleFunc("/api/overall-pace", s.handleOverallPace)
 
-	// Everything else is the embedded SPA.
-	mux.Handle("/", staticHandler())
+	mux.HandleFunc("/api/templates/workouts", s.handleWorkoutTemplates)
+	mux.HandleFunc("/api/templates/workouts/", s.handleWorkoutTemplateByID)
+	mux.HandleFunc("/api/workouts", s.handleWorkouts)
+	mux.HandleFunc("/api/workouts/", s.handleWorkoutByID)
+
+	// Server-rendered UI with HTMX for the tab shell + workouts view.
+	s.registerUIRoutes(mux)
 }
 
 // --- helpers ---

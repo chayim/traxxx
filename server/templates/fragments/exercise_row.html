@@ -1,0 +1,9 @@
+{{define "exercise_row.html"}}
+<div class="row" data-idx="{{.Idx}}">
+  <input type="text" name="ex_name" placeholder="Exercise name" value="{{.Exercise.Name}}" required>
+  <input type="number" name="ex_sets" placeholder="sets" min="0" value="{{intOrEmpty .Exercise.TargetSets}}">
+  <input type="number" name="ex_reps" placeholder="reps" min="0" value="{{intOrEmpty .Exercise.TargetReps}}">
+  <input type="number" name="ex_seconds" placeholder="seconds" min="0" value="{{intOrEmpty .Exercise.TargetSeconds}}">
+  <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
+</div>
+{{end}}

@@ -1,0 +1,8 @@
+{{define "set_row.html"}}
+<div class="set-row">
+  <span>#{{add .SetIdx 1}}</span>
+  <input type="number" name="set_{{.ExIdx}}_reps" placeholder="reps" min="0" value="{{intOrEmpty .Set.Reps}}">
+  <input type="number" name="set_{{.ExIdx}}_seconds" placeholder="seconds" min="0" value="{{intOrEmpty .Set.Seconds}}">
+  <button type="button" class="danger" onclick="this.closest('.set-row').remove()">×</button>
+</div>
+{{end}}

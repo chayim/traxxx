@@ -1,0 +1,40 @@
+{{template "header" .}}
+<h2>Workout: {{.Workout.Name}}</h2>
+
+<form method="post" action="/ui/workouts/{{.Workout.ID}}">
+  <p>
+    <label>Name<br>
+      <input type="text" name="name" value="{{.Workout.Name}}" required style="max-width: 400px;">
+    </label>
+  </p>
+  <p>
+    <label>Date<br>
+      <input type="date" name="workout_date" value="{{dateOnly .Workout.WorkoutDate}}" required style="max-width: 200px;">
+    </label>
+  </p>
+  <p>
+    <label>Notes<br>
+      <textarea name="notes" rows="2" style="max-width: 600px;">{{.Workout.Notes}}</textarea>
+    </label>
+  </p>
+
+  <h3>Exercises</h3>
+  <div id="exercise-rows">
+    {{range $i, $e := .Workout.Exercises}}
+      {{template "workout_exercise_row.html" (dict "Idx" $i "Exercise" $e)}}
+    {{end}}
+  </div>
+  <p class="toolbar">
+    <button type="button"
+            hx-get="/ui/fragments/exercise-row?sets=1"
+            hx-vals='js:{idx: Date.now()}'
+            hx-target="#exercise-rows"
+            hx-swap="beforeend">+ Add exercise</button>
+  </p>
+
+  <p class="toolbar">
+    <button type="submit" class="primary">Save workout</button>
+    <a class="btn" href="/ui/workouts">Cancel</a>
+  </p>
+</form>
+{{template "footer" .}}

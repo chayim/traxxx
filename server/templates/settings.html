@@ -1,0 +1,36 @@
+{{template "header" .}}
+<div class="page-head">
+  <h2>Settings</h2>
+  <a class="btn primary" href="/ui/templates/workouts/new">+ New template</a>
+</div>
+
+<h3>Workout templates</h3>
+<p class="muted">Programmes you've defined. Clone one to start today's workout.</p>
+
+{{if .Templates}}
+<table>
+<thead><tr><th>Name</th><th>Exercises</th><th></th></tr></thead>
+<tbody>
+{{range .Templates}}
+<tr>
+  <td><a href="/ui/templates/workouts/{{.ID}}">{{.Name}}</a></td>
+  <td>{{.ExCount}}</td>
+  <td>
+    <form method="post" action="/ui/workouts/clone" class="inline-form">
+      <input type="hidden" name="template_id" value="{{.ID}}">
+      <button class="primary" type="submit">Clone to today</button>
+    </form>
+    <form method="post" action="/ui/templates/workouts/delete" class="inline-form"
+          onsubmit="return confirm('Delete this template? Existing workouts cloned from it are preserved.');">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <button class="danger" type="submit">Delete</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="muted">No templates yet.</p>
+{{end}}
+{{template "footer" .}}

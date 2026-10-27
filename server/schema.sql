@@ -46,3 +46,60 @@ CREATE INDEX IF NOT EXISTS idx_track_points_activity ON track_points(activity_id
 -- Seed a few default activity types.
 INSERT OR IGNORE INTO activity_types (name) VALUES
     ('run'), ('ride'), ('walk'), ('hike'), ('swim'), ('other');
+
+-- Workout templates: reusable programmes owned by a user.
+CREATE TABLE IF NOT EXISTS workout_templates (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_workout_templates_user ON workout_templates(user_id);
+
+-- Ordered exercises inside a template. reps/seconds nullable so an
+-- exercise can target reps, duration, or both.
+CREATE TABLE IF NOT EXISTS template_exercises (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id    INTEGER NOT NULL REFERENCES workout_templates(id) ON DELETE CASCADE,
+    position       INTEGER NOT NULL,
+    name           TEXT NOT NULL,
+    target_sets    INTEGER,
+    target_reps    INTEGER,
+    target_seconds INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_template_exercises_tpl ON template_exercises(template_id, position);
+
+-- A dated workout performed by a user. template_id tracks provenance; nullable
+-- so a workout can outlive its originating template.
+CREATE TABLE IF NOT EXISTS workouts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    template_id  INTEGER REFERENCES workout_templates(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    workout_date DATE NOT NULL,
+    notes        TEXT,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts(user_id, workout_date);
+
+-- Exercises snapshotted into a workout at clone time.
+CREATE TABLE IF NOT EXISTS workout_exercises (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    workout_id     INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    position       INTEGER NOT NULL,
+    name           TEXT NOT NULL,
+    target_sets    INTEGER,
+    target_reps    INTEGER,
+    target_seconds INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_workout_exercises_wk ON workout_exercises(workout_id, position);
+
+-- Actual sets performed per exercise.
+CREATE TABLE IF NOT EXISTS workout_sets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    exercise_id INTEGER NOT NULL REFERENCES workout_exercises(id) ON DELETE CASCADE,
+    set_number  INTEGER NOT NULL,
+    reps        INTEGER,
+    seconds     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_workout_sets_ex ON workout_sets(exercise_id, set_number);

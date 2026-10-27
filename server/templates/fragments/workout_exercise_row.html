@@ -1,0 +1,27 @@
+{{define "workout_exercise_row.html"}}
+<div class="exercise-block" data-ex-idx="{{.Idx}}">
+  <div class="row">
+    <input type="text" name="ex_name" placeholder="Exercise name" value="{{.Exercise.Name}}" required>
+    <input type="number" name="ex_sets" placeholder="target sets" min="0" value="{{intOrEmpty .Exercise.TargetSets}}">
+    <input type="number" name="ex_reps" placeholder="target reps" min="0" value="{{intOrEmpty .Exercise.TargetReps}}">
+    <input type="number" name="ex_seconds" placeholder="target seconds" min="0" value="{{intOrEmpty .Exercise.TargetSeconds}}">
+    <button type="button" class="danger" onclick="this.closest('.exercise-block').remove()">× Remove</button>
+  </div>
+  <input type="hidden" name="ex_idx" value="{{.Idx}}">
+
+  <div class="set-row col-label">
+    <span>Set</span><span>Reps</span><span>Seconds</span><span></span>
+  </div>
+  <div id="sets-{{.Idx}}" class="sets-container" data-ex-idx="{{.Idx}}">
+    {{range $j, $s := .Exercise.Sets}}
+      {{template "set_row.html" (dict "ExIdx" $.Idx "SetIdx" $j "Set" $s)}}
+    {{end}}
+  </div>
+  <p class="toolbar" style="margin-left: 20px;">
+    <button type="button"
+            hx-get="/ui/fragments/set-row?ex_idx={{.Idx}}&set_idx={{len .Exercise.Sets}}"
+            hx-target="#sets-{{.Idx}}"
+            hx-swap="beforeend">+ Add set</button>
+  </p>
+</div>
+{{end}}

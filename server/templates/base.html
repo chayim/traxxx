@@ -1,0 +1,382 @@
+{{define "header"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Shell.Title}} · traxxx</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0d12;
+    --bg-elev: #10151c;
+    --bg-elev-2: #161c25;
+    --bg-hover: #1b2330;
+    --border: #1f2733;
+    --border-strong: #2a3444;
+    --text: #e6edf6;
+    --text-dim: #8a97ab;
+    --text-faint: #5b6678;
+    --accent: #7cf3c8;
+    --accent-dim: #2a5a4a;
+    --accent-glow: rgba(124, 243, 200, 0.22);
+    --warn: #ffb86b;
+    --err: #ff6b7a;
+    --info: #6bb6ff;
+    --purple: #c58bff;
+    --font: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Inter", sans-serif;
+    --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(124, 243, 200, 0.06), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, rgba(197, 139, 255, 0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+  ::selection { background: var(--accent-dim); color: var(--text); }
+
+  #app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg) 100%);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 20px 14px; gap: 20px;
+    min-width: 0;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px; text-decoration: none; color: var(--text); }
+  .brand:hover { text-decoration: none; }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-dim));
+    color: #06130e; display: grid; place-items: center;
+    font-size: 18px; font-weight: 800;
+    box-shadow: 0 0 24px var(--accent-glow);
+  }
+  .brand-name { font-weight: 700; letter-spacing: 0.5px; }
+  .brand-sub { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; }
+
+  nav.sidenav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-section-title {
+    font-size: 10px; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 1.2px;
+    padding: 10px 10px 4px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    color: var(--text-dim); font-size: 13px;
+    text-decoration: none; user-select: none;
+    transition: background 120ms, color 120ms;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+  .nav-item.active {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.9; }
+
+  .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 999px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim);
+  }
+  .status-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { box-shadow: 0 0 16px var(--accent); } }
+
+  /* ---------- main ---------- */
+  #main { display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    background: rgba(10, 13, 18, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .crumbs { font-size: 13px; color: var(--text-dim); }
+  .crumbs strong { color: var(--text); font-weight: 600; }
+  .crumbs a { color: var(--text-dim); }
+  .crumbs a:hover { color: var(--text); text-decoration: none; }
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+  #view { padding: 24px; overflow: auto; flex: 1; }
+
+  /* ---------- typography ---------- */
+  h1, h2, h3 { color: var(--text); letter-spacing: -0.01em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin: 4px 0 20px; }
+  h3 { font-size: 12px; font-weight: 600; margin: 24px 0 10px;
+    text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-faint); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+    background: var(--bg-elev-2); padding: 2px 6px; border-radius: 4px; }
+  .muted { color: var(--text-faint); font-size: 13px; }
+
+  /* ---------- buttons ---------- */
+  button, .btn {
+    font: inherit; cursor: pointer;
+    padding: 7px 12px; border-radius: 8px;
+    background: var(--bg-elev-2); color: var(--text);
+    border: 1px solid var(--border-strong);
+    transition: background 120ms, border-color 120ms, color 120ms, transform 60ms;
+    display: inline-flex; align-items: center; gap: 6px;
+    text-decoration: none;
+    font-size: 13px;
+  }
+  button:hover, .btn:hover { background: var(--bg-hover); border-color: var(--accent-dim); text-decoration: none; }
+  button:active, .btn:active { transform: translateY(1px); }
+  button.primary, .btn.primary {
+    background: linear-gradient(180deg, var(--accent) 0%, #52c99f 100%);
+    color: #06130e; border-color: transparent; font-weight: 600;
+    box-shadow: 0 0 0 1px var(--accent-dim), 0 6px 20px -8px var(--accent-glow);
+  }
+  button.primary:hover, .btn.primary:hover { filter: brightness(1.08); }
+  button.danger, .btn.danger { color: var(--err); border-color: #4a2630; background: transparent; }
+  button.danger:hover, .btn.danger:hover { background: #2a1620; }
+  .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+  /* ---------- cards / tables ---------- */
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th {
+    font-weight: 500; color: var(--text-faint);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    background: var(--bg-elev-2);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr { transition: background 120ms; }
+  tbody tr:hover { background: var(--bg-elev-2); }
+  td.mono { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+
+  /* ---------- form rows (editors) ---------- */
+  .row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(80px, 1fr)) auto;
+    gap: 10px; align-items: center;
+    margin-bottom: 8px;
+  }
+  .set-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 1fr auto;
+    gap: 10px; align-items: center;
+    margin: 6px 0 6px 24px;
+  }
+  .col-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-faint); font-weight: 500;
+  }
+
+  input[type=text], input[type=number], input[type=date], textarea {
+    background: var(--bg); border: 1px solid var(--border-strong);
+    color: var(--text); border-radius: 8px; padding: 9px 12px;
+    font: inherit; font-family: inherit;
+    width: 100%;
+    outline: none;
+    transition: border-color 120ms, box-shadow 120ms;
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-faint); }
+  input:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  label {
+    font-size: 11px; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 500;
+  }
+
+  .row > button.danger, .set-row > button.danger, .exercise-block .row > button.danger {
+    width: 32px; height: 32px; padding: 0; justify-content: center;
+    border-radius: 8px; font-size: 14px; line-height: 1;
+  }
+
+  .exercise-block {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+
+  form { margin: 0; }
+  .inline-form { display: inline; }
+  .inline-form + .inline-form { margin-left: 6px; }
+
+  /* ---------- page head ---------- */
+  .page-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; margin-bottom: 20px;
+  }
+  .page-head h2 { margin: 0; }
+
+  /* ---------- stat tiles ---------- */
+  .stat-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    margin: 16px 0 24px;
+  }
+  .stat {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .stat-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-faint); font-weight: 500;
+  }
+  .stat-value {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 1.45rem; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  /* ---------- map ---------- */
+  #map {
+    height: 480px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    margin: 14px 0 24px;
+  }
+
+  /* ---------- pills ---------- */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px; border-radius: 999px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .pill.accent {
+    background: rgba(124, 243, 200, 0.08);
+    color: var(--accent);
+    border-color: var(--accent-dim);
+  }
+  .pill.accent::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  }
+
+  /* ---------- scrollbars ---------- */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4556; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 720px) {
+    #app { grid-template-columns: 1fr; }
+    .sidebar {
+      flex-direction: row; align-items: center;
+      padding: 10px 14px; gap: 12px;
+      border-right: none; border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .sidebar-foot { display: none; }
+    nav.sidenav { flex-direction: row; }
+    .nav-section-title { display: none; }
+    .nav-item { padding: 6px 10px; }
+    body { overflow: auto; }
+    html, body, #app { height: auto; }
+    #main, #view { min-height: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <a href="/ui/activities" class="brand">
+      <div class="brand-mark">t</div>
+      <div>
+        <div class="brand-name">traxxx</div>
+        <div class="brand-sub">tracker</div>
+      </div>
+    </a>
+    <nav class="sidenav">
+      <div class="nav-section-title">Workspace</div>
+      <a href="/ui/activities" class="nav-item {{if eq .Shell.ActiveTab "activities"}}active{{end}}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12h4l3-8 4 16 3-8h4"/>
+        </svg>
+        Activities
+      </a>
+      <a href="/ui/workouts" class="nav-item {{if eq .Shell.ActiveTab "workouts"}}active{{end}}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6.5 6.5l11 11"/><path d="M21 21l-1-1"/><path d="M3 3l1 1"/>
+          <path d="M18 22l4-4"/><path d="M2 6l4-4"/>
+          <path d="M3 10l7-7"/><path d="M14 21l7-7"/>
+        </svg>
+        Workouts
+      </a>
+      <div class="nav-section-title">System</div>
+      <a href="/ui/settings" class="nav-item {{if eq .Shell.ActiveTab "settings"}}active{{end}}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09c0 .66.39 1.26 1 1.51a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82c.25.61.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status-pill"><span class="dot"></span>online</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header class="topbar">
+      <div class="crumbs">
+        <a href="/ui/activities">traxxx</a> / <strong>{{.Shell.Title}}</strong>
+      </div>
+      <div class="topbar-actions"></div>
+    </header>
+    <section id="view">
+{{end}}
+
+{{define "footer"}}
+    </section>
+  </main>
+</div>
+</body>
+</html>
+{{end}}
