@@ -1,6 +1,5 @@
 .PHONY: help \
-        server server-run server-seed \
-        docker-build \
+        server server-seed \
         android-sdk android-wrapper apk android-install android-dev android-logs android-stop \
         clean
 
@@ -12,6 +11,9 @@ DB       ?= traxxx.db
 
 APP_ID   := com.kirshen.traxxx
 
+APK_SRC      := $(ANDROID_DIR)/app/build/outputs/apk/debug/app-debug.apk
+APK_EMBEDDED := $(SERVER_DIR)/embed/app-debug.apk
+
 help:  ## Show this help
 	@echo "traxxx build targets"
 	@echo
@@ -21,23 +23,13 @@ help:  ## Show this help
 
 # ---------- server (Go) ----------
 
-server: ## Build the Go server binary (server/server)
+server: apk ## Build the Go server binary (embeds the debug APK for /download)
+	@mkdir -p $(SERVER_DIR)/embed
+	cp $(APK_SRC) $(APK_EMBEDDED)
 	cd $(SERVER_DIR) && go mod tidy && go build -o traxxx .
-
-server-run: ## Run the Go server (API_ADDR, DB)
-	cd $(SERVER_DIR) && go run . --addr $(API_ADDR) --db $(DB)
 
 server-seed: ## Wipe and seed the DB with ~100 fake activities
 	cd $(SERVER_DIR) && go run . --seed --db $(DB)
-
-# ---------- docker (server image) ----------
-# Override DOCKER_IMAGE to your Docker Hub repo, e.g. DOCKER_IMAGE=youruser/traxxx-server
-DOCKER_IMAGE ?= traxxx-server
-DOCKER_TAG   ?= latest
-DATA_VOLUME  ?= traxxx-data
-
-docker-build: ## Build the server Docker image
-	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) $(SERVER_DIR)
 
 # ---------- android (native Kotlin / Jetpack) ----------
 # Requires: JDK 17. The `android-sdk` target bootstraps a user-local Android SDK
@@ -103,5 +95,5 @@ android-stop: ## Force-stop the app (useful for testing survive-kill)
 # ---------- cleanup ----------
 
 clean: ## Remove build artifacts (keeps node_modules, keeps DB)
-	rm -f $(SERVER_DIR)/server
+	rm -f $(SERVER_DIR)/traxxx $(APK_EMBEDDED)
 	rm -rf $(ANDROID_DIR)/app/build $(ANDROID_DIR)/build $(ANDROID_DIR)/.gradle

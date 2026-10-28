@@ -86,6 +86,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/download/traxxx.apk", s.handleAPKDownload)
 	s.registerUIRoutes(mux)
 	mux.Handle("/static/", staticHandler())
 }
