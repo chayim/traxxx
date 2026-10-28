@@ -80,6 +80,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/templates/workouts/", s.handleWorkoutTemplateByID)
 	mux.HandleFunc("/api/workouts", s.handleWorkouts)
 	mux.HandleFunc("/api/workouts/", s.handleWorkoutByID)
+	mux.HandleFunc("/api/weights", s.handleWeights)
+	mux.HandleFunc("/api/weights/", s.handleWeightByID)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok"))

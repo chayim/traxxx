@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.MonitorWeight
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import com.kirshen.traxxx.ui.screens.RecordScreen
 import com.kirshen.traxxx.ui.screens.SettingsScreen
 import com.kirshen.traxxx.ui.screens.TemplateEditScreen
 import com.kirshen.traxxx.ui.screens.UserSetupScreen
+import com.kirshen.traxxx.ui.screens.WeightsScreen
 import com.kirshen.traxxx.ui.screens.WorkoutDetailScreen
 import com.kirshen.traxxx.ui.screens.WorkoutEditScreen
 import com.kirshen.traxxx.ui.screens.WorkoutTemplatesScreen
@@ -50,6 +52,7 @@ private sealed class Dest(val route: String, val label: String, val icon: @Compo
     object Record   : Dest("record",   "Record",   { Icon(Icons.Outlined.PlayArrow, null) })
     object History  : Dest("history",  "History",  { Icon(Icons.Outlined.History, null) })
     object Workouts : Dest("workouts", "Workouts", { Icon(Icons.Outlined.FitnessCenter, null) })
+    object Weights  : Dest("weights",  "Weight",   { Icon(Icons.Outlined.MonitorWeight, null) })
     object Settings : Dest("settings", "Settings", { Icon(Icons.Outlined.Settings, null) })
 }
 
@@ -72,7 +75,7 @@ fun Nav() {
     Scaffold(
         bottomBar = {
             NavigationBar {
-                listOf(Dest.Record, Dest.Workouts, Dest.History, Dest.Settings).forEach { d ->
+                listOf(Dest.Record, Dest.Workouts, Dest.History, Dest.Weights, Dest.Settings).forEach { d ->
                     NavigationBarItem(
                         icon = d.icon,
                         label = { Text(d.label) },
@@ -119,6 +122,7 @@ fun Nav() {
                     onBack = { nav.popBackStack() },
                 )
             }
+            composable(Dest.Weights.route) { WeightsScreen() }
             composable(Dest.Settings.route) { SettingsScreen() }
 
             composable(Dest.Workouts.route) {

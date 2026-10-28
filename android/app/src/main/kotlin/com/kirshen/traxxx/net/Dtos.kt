@@ -133,6 +133,22 @@ data class WorkoutDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class WeightDto(
+    val id: Long = 0,
+    @Json(name = "user_id") val userId: Long = 0,
+    @Json(name = "weight_kg") val weightKg: Double,
+    val date: String,
+    @Json(name = "created_at") val createdAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateWeightDto(
+    @Json(name = "user_id") val userId: Long,
+    @Json(name = "weight_kg") val weightKg: Double,
+    val date: String,
+)
+
+@JsonClass(generateAdapter = true)
 data class CreateWorkoutDto(
     @Json(name = "user_id") val userId: Long,
     @Json(name = "template_id") val templateId: Long? = null,

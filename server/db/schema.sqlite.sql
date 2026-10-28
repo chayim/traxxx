@@ -93,6 +93,15 @@ CREATE TABLE IF NOT EXISTS workout_sets (
 );
 CREATE INDEX IF NOT EXISTS idx_workout_sets_ex ON workout_sets(exercise_id, set_number);
 
+CREATE TABLE IF NOT EXISTS weights (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    weight_kg   REAL NOT NULL,
+    weight_date TEXT NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_weights_user_date ON weights(user_id, weight_date);
+
 INSERT INTO activity_types (name) VALUES
     ('run'), ('ride'), ('walk'), ('hike'), ('swim'), ('other')
     ON CONFLICT (name) DO NOTHING;

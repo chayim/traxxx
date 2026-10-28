@@ -73,6 +73,9 @@ func (s *Server) registerUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ui/fragments/set-row", s.fragSetRow)
 	mux.HandleFunc("/ui/workouts/clone", s.uiCloneTemplate)
 	mux.HandleFunc("/ui/workouts/delete", s.uiDeleteWorkout)
+	mux.HandleFunc("/ui/weights", s.uiWeights)
+	mux.HandleFunc("/ui/weights/create", s.uiWeightCreate)
+	mux.HandleFunc("/ui/weights/delete", s.uiWeightDelete)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

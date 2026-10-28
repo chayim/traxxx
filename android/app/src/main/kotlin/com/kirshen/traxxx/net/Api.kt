@@ -71,4 +71,15 @@ interface Api {
 
     @DELETE("api/workouts/{id}")
     suspend fun deleteWorkout(@Path("id") id: Long)
+
+    // --- Weights ---
+
+    @GET("api/weights")
+    suspend fun listWeights(@Query("user_id") userId: Long): List<WeightDto>
+
+    @POST("api/weights")
+    suspend fun createWeight(@Body body: CreateWeightDto): WeightDto
+
+    @DELETE("api/weights/{id}")
+    suspend fun deleteWeight(@Path("id") id: Long)
 }

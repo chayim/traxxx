@@ -1,0 +1,175 @@
+{{template "header" .}}
+<h2>Weight</h2>
+
+<div class="card" style="padding: 20px;">
+  <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+    <h3 style="margin:0;">Trend</h3>
+    <span id="wt-latest" class="muted"></span>
+  </div>
+  <div id="wt-chart-wrap" style="position:relative; width:100%; height:300px;">
+    <svg id="wt-chart" width="100%" height="100%" viewBox="0 0 800 300" preserveAspectRatio="none"
+         xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="wt-empty" class="muted"
+         style="position:absolute; inset:0; display:none; align-items:center; justify-content:center;">
+      No entries yet.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Log entry</h3>
+  <form method="post" action="/ui/weights/create" style="display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; align-items:end;">
+    <div>
+      <label for="wk">Weight (kg)</label>
+      <input id="wk" type="number" step="0.1" min="0" name="weight_kg" placeholder="e.g. 72.5" required>
+    </div>
+    <div>
+      <label for="wd">Date</label>
+      <input id="wd" type="date" name="weight_date" value="{{.Today}}">
+    </div>
+    <button type="submit" class="primary">Add</button>
+  </form>
+</div>
+
+{{if .Weights}}
+<table>
+<thead><tr><th>Date</th><th>Weight (kg)</th><th></th></tr></thead>
+<tbody>
+{{range .Weights}}
+<tr>
+  <td>{{.Date}}</td>
+  <td class="mono">{{printf "%.1f" .WeightKg}}</td>
+  <td>
+    <form method="post" action="/ui/weights/delete"
+          onsubmit="return confirm('Delete this entry?');" style="margin:0">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="muted">No weight entries yet. Add your first one above.</p>
+{{end}}
+
+<script>
+(function () {
+  const points = {{.Points}};
+  const svg = document.getElementById('wt-chart');
+  const empty = document.getElementById('wt-empty');
+  const latest = document.getElementById('wt-latest');
+  if (!Array.isArray(points) || points.length === 0) {
+    empty.style.display = 'flex';
+    return;
+  }
+  // Reset
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const W = 800, H = 300;
+  const pad = { l: 48, r: 16, t: 16, b: 32 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+
+  const vals = points.map(p => p.w);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) { min -= 1; max += 1; }
+  const range = max - min;
+  const pMin = min - range * 0.1;
+  const pMax = max + range * 0.1;
+
+  const toTs = s => Date.parse(s + 'T00:00:00Z');
+  const ts = points.map(p => toTs(p.d));
+  const tMin = ts[0], tMax = ts[ts.length - 1];
+  const tRange = Math.max(1, tMax - tMin);
+
+  const x = i => points.length === 1
+    ? pad.l + iw / 2
+    : pad.l + (ts[i] - tMin) / tRange * iw;
+  const y = v => pad.t + (1 - (v - pMin) / (pMax - pMin)) * ih;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs) => {
+    const e = document.createElementNS(NS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+
+  // Gridlines + y labels
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = pMin + (pMax - pMin) * (i / ticks);
+    const yy = y(v);
+    svg.appendChild(el('line', {
+      x1: pad.l, x2: W - pad.r, y1: yy, y2: yy,
+      stroke: '#1f2733', 'stroke-width': 1,
+    }));
+    const t = el('text', {
+      x: pad.l - 8, y: yy + 4,
+      'text-anchor': 'end',
+      'font-family': 'ui-sans-serif, system-ui, sans-serif',
+      'font-size': 11, fill: '#5b6678',
+    });
+    t.textContent = v.toFixed(1);
+    svg.appendChild(t);
+  }
+
+  // X labels — first, middle, last
+  const xTicks = points.length === 1
+    ? [0]
+    : points.length === 2 ? [0, points.length - 1]
+      : [0, Math.floor(points.length / 2), points.length - 1];
+  xTicks.forEach(i => {
+    const t = el('text', {
+      x: x(i), y: H - pad.b + 18,
+      'text-anchor': 'middle',
+      'font-family': 'ui-sans-serif, system-ui, sans-serif',
+      'font-size': 11, fill: '#5b6678',
+    });
+    t.textContent = points[i].d.slice(5); // MM-DD
+    svg.appendChild(t);
+  });
+
+  // Area under curve
+  if (points.length > 1) {
+    let d = `M ${x(0)} ${y(points[0].w)}`;
+    for (let i = 1; i < points.length; i++) d += ` L ${x(i)} ${y(points[i].w)}`;
+    // line
+    const line = el('path', {
+      d, fill: 'none', stroke: '#7cf3c8', 'stroke-width': 2,
+      'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+    });
+    // area (close down to baseline)
+    const area = el('path', {
+      d: `${d} L ${x(points.length - 1)} ${H - pad.b} L ${x(0)} ${H - pad.b} Z`,
+      fill: 'url(#wtGrad)',
+    });
+    const defs = el('defs', {});
+    const grad = el('linearGradient', { id: 'wtGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
+    grad.appendChild(el('stop', { offset: '0%', 'stop-color': '#7cf3c8', 'stop-opacity': 0.35 }));
+    grad.appendChild(el('stop', { offset: '100%', 'stop-color': '#7cf3c8', 'stop-opacity': 0 }));
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+    svg.appendChild(area);
+    svg.appendChild(line);
+  }
+
+  // Points
+  points.forEach((p, i) => {
+    const c = el('circle', {
+      cx: x(i), cy: y(p.w), r: 3.5,
+      fill: '#0a0d12', stroke: '#7cf3c8', 'stroke-width': 2,
+    });
+    const title = el('title', {});
+    title.textContent = `${p.d}  ${p.w.toFixed(1)} kg`;
+    c.appendChild(title);
+    svg.appendChild(c);
+  });
+
+  const last = points[points.length - 1];
+  latest.textContent = `Latest: ${last.w.toFixed(1)} kg · ${last.d}`;
+})();
+</script>
+
+{{template "footer" .}}
