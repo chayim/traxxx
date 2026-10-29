@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -31,7 +32,6 @@ import androidx.navigation.navArgument
 import com.kirshen.traxxx.data.Prefs
 import com.kirshen.traxxx.data.Repository
 import com.kirshen.traxxx.net.NetModule
-import com.kirshen.traxxx.service.RecordingState
 import com.kirshen.traxxx.ui.screens.ActiveRecordingScreen
 import com.kirshen.traxxx.ui.screens.ActivityDetailScreen
 import com.kirshen.traxxx.ui.screens.HistoryScreen
@@ -70,7 +70,8 @@ fun Nav() {
     val nav = rememberNavController()
     val stack = nav.currentBackStackEntryAsState().value
     val currentRoute = stack?.destination?.route ?: Dest.Record.route
-    val active = RecordingState.state.collectAsState().value
+    val active = remember(prefs.userId) { Repository.get(ctx).inProgressFlow() }
+        .collectAsState(initial = null).value
 
     Scaffold(
         bottomBar = {

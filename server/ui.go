@@ -75,6 +75,7 @@ func (s *Server) registerUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ui/workouts/delete", s.uiDeleteWorkout)
 	mux.HandleFunc("/ui/weights", s.uiWeights)
 	mux.HandleFunc("/ui/weights/create", s.uiWeightCreate)
+	mux.HandleFunc("/ui/weights/update", s.uiWeightUpdate)
 	mux.HandleFunc("/ui/weights/delete", s.uiWeightDelete)
 }
 
@@ -133,10 +134,40 @@ func (s *Server) uiActivities(w http.ResponseWriter, r *http.Request) {
 		rr.HasTrack = rr.PointCount > 0
 		out = append(out, rr)
 	}
+	const pageSize = 25
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	total := len(out)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
 	render(w, "activities.html", struct {
 		Shell      uiShell
 		Activities []row
-	}{uiShell{ActiveTab: "activities", UserID: userID, Title: "Activities"}, out})
+		Page       int
+		PageSize   int
+		Total      int
+		HasPrev    bool
+		HasNext    bool
+		PrevPage   int
+		NextPage   int
+		PageFrom   int
+		PageTo     int
+	}{
+		Shell:      uiShell{ActiveTab: "activities", UserID: userID, Title: "Activities"},
+		Activities: out[start:end],
+		Page:       page, PageSize: pageSize, Total: total,
+		HasPrev: page > 1, HasNext: end < total,
+		PrevPage: page - 1, NextPage: page + 1,
+		PageFrom: start + 1, PageTo: end,
+	})
 }
 
 func (s *Server) uiActivityDetail(w http.ResponseWriter, r *http.Request) {

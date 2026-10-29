@@ -149,6 +149,20 @@ data class CreateWeightDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateWeightDto(
+    @Json(name = "weight_kg") val weightKg: Double,
+    val date: String,
+)
+
+@JsonClass(generateAdapter = true)
+data class WeightsPageDto(
+    val items: List<WeightDto> = emptyList(),
+    val total: Long = 0,
+    val limit: Int = 0,
+    val offset: Int = 0,
+)
+
+@JsonClass(generateAdapter = true)
 data class CreateWorkoutDto(
     @Json(name = "user_id") val userId: Long,
     @Json(name = "template_id") val templateId: Long? = null,

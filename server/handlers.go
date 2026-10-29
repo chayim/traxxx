@@ -176,6 +176,13 @@ func (s *Server) handleActivities(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type activitiesPageResp struct {
+	Items  []Activity `json:"items"`
+	Total  int        `json:"total"`
+	Limit  int        `json:"limit"`
+	Offset int        `json:"offset"`
+}
+
 func (s *Server) listActivities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
@@ -217,6 +224,19 @@ func (s *Server) listActivities(w http.ResponseWriter, r *http.Request) {
 		out = append(out, a)
 	}
 	s.annotatePaces(ctx, out)
+	total := len(out)
+	limit, offset := parsePaging(r)
+	if limit > 0 {
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		writeJSON(w, 200, activitiesPageResp{Items: out[offset:end], Total: total, Limit: limit, Offset: offset})
+		return
+	}
 	writeJSON(w, 200, out)
 }
 

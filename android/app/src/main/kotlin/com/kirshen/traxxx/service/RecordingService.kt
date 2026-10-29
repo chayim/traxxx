@@ -54,17 +54,38 @@ class RecordingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Start foreground immediately so Android doesn't ANR us.
-        startForegroundCompat(NOTIF_ID, buildNotification("Recording…", "Looking for in-progress run"))
-        scope.launch {
-            val row = repo.inProgress()
-            if (row == null) {
-                stopForegroundAndSelf()
-                return@launch
+        return try {
+            // Start foreground immediately so Android doesn't ANR us.
+            val useGps = intent?.getBooleanExtra(EXTRA_USE_GPS, false) ?: false
+            val started = startForegroundCompat(
+                NOTIF_ID,
+                buildNotification("Recording…", "Looking for in-progress run"),
+                useGps,
+            )
+            if (!started) {
+                // startForeground threw on every fallback (e.g. FGS restriction); bail.
+                stopSelf()
+                return START_NOT_STICKY
             }
-            attach(row)
+            scope.launch {
+                try {
+                    val row = repo.inProgress()
+                    if (row == null) {
+                        stopForegroundAndSelf()
+                        return@launch
+                    }
+                    attach(row)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "attach failed: ${t.message}", t)
+                    stopForegroundAndSelf()
+                }
+            }
+            START_STICKY
+        } catch (t: Throwable) {
+            Log.e(TAG, "onStartCommand failed: ${t.message}", t)
+            try { stopSelf() } catch (_: Throwable) {}
+            START_NOT_STICKY
         }
-        return START_STICKY
     }
 
     private suspend fun attach(row: ActivityEntity) {
@@ -152,14 +173,42 @@ class RecordingService : Service(), LocationListener {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-    private fun startForegroundCompat(id: Int, notif: android.app.Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceCompat.startForeground(
-                this, id, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-            )
-        } else {
-            super.startForeground(id, notif)
+    private fun startForegroundCompat(id: Int, notif: android.app.Notification, useGps: Boolean): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return try {
+                super.startForeground(id, notif)
+                true
+            } catch (t: Throwable) {
+                Log.e(TAG, "startForeground (pre-Q) failed: ${t.message}", t)
+                false
+            }
         }
+        // Try types in order: LOCATION (if we actually have the perm), SPECIAL_USE, then 0.
+        // Whichever first succeeds satisfies the FGS-must-start-in-time contract so the
+        // system does not crash the process out from under us.
+        val attempts = buildList {
+            if (useGps && hasLocationPermission()) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            add(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            if (!useGps || !hasLocationPermission()) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            add(0)
+        }.distinct()
+        for (type in attempts) {
+            try {
+                ServiceCompat.startForeground(this, id, notif, type)
+                if (type == 0) Log.w(TAG, "startForeground succeeded with type=0 fallback")
+                return true
+            } catch (t: Throwable) {
+                Log.w(TAG, "startForeground type=$type failed: ${t.message}")
+            }
+        }
+        Log.e(TAG, "startForeground: all fallbacks exhausted")
+        return false
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+        return fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED
     }
 
     private fun stopForegroundAndSelf() {
@@ -180,9 +229,10 @@ class RecordingService : Service(), LocationListener {
         private const val TAG = "TraxxxService"
         const val CHANNEL_ID = "recording"
         const val NOTIF_ID = 42
+        const val EXTRA_USE_GPS = "use_gps"
 
-        fun start(ctx: Context) {
-            val i = Intent(ctx, RecordingService::class.java)
+        fun start(ctx: Context, useGps: Boolean) {
+            val i = Intent(ctx, RecordingService::class.java).putExtra(EXTRA_USE_GPS, useGps)
             ContextCompat.startForegroundService(ctx, i)
         }
 

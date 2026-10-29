@@ -75,10 +75,17 @@ interface Api {
     // --- Weights ---
 
     @GET("api/weights")
-    suspend fun listWeights(@Query("user_id") userId: Long): List<WeightDto>
+    suspend fun listWeights(
+        @Query("user_id") userId: Long,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): WeightsPageDto
 
     @POST("api/weights")
     suspend fun createWeight(@Body body: CreateWeightDto): WeightDto
+
+    @PUT("api/weights/{id}")
+    suspend fun updateWeight(@Path("id") id: Long, @Body body: UpdateWeightDto): WeightDto
 
     @DELETE("api/weights/{id}")
     suspend fun deleteWeight(@Path("id") id: Long)

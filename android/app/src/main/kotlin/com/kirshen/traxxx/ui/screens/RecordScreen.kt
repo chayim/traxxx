@@ -1,5 +1,12 @@
 package com.kirshen.traxxx.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +70,27 @@ fun RecordScreen() {
 
     val current = selected ?: ActivityType.WALK
 
+    fun startRecording(type: ActivityType) {
+        scope.launch {
+            val userId = prefs.flow.first().userId ?: return@launch
+            prefs.setLastActivityType(type.typeName)
+            Repository.get(ctx).startRecording(userId, type)
+            RecordingService.start(ctx, useGps = type.gps)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            startRecording(current)
+        } else {
+            Toast.makeText(ctx, "Location permission required for GPS activities", Toast.LENGTH_LONG).show()
+        }
+    }
+
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -119,11 +147,27 @@ fun RecordScreen() {
 
         Button(
             onClick = {
-                scope.launch {
-                    val userId = prefs.flow.first().userId ?: return@launch
-                    prefs.setLastActivityType(current.typeName)
-                    Repository.get(ctx).startRecording(userId, current)
-                    RecordingService.start(ctx)
+                if (current.gps) {
+                    val granted = ContextCompat.checkSelfPermission(
+                        ctx, Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(
+                            ctx, Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+                    if (granted) {
+                        startRecording(current)
+                    } else {
+                        val perms = buildList {
+                            add(Manifest.permission.ACCESS_FINE_LOCATION)
+                            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }.toTypedArray()
+                        permissionLauncher.launch(perms)
+                    }
+                } else {
+                    startRecording(current)
                 }
             },
             shape = CircleShape,

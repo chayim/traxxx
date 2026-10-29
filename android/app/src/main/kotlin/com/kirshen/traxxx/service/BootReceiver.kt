@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.kirshen.traxxx.data.ActivityType
 import com.kirshen.traxxx.data.Repository
 import com.kirshen.traxxx.sync.SyncScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -19,9 +20,11 @@ class BootReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 val repo = Repository.get(context)
-                if (repo.inProgress() != null) {
+                val row = repo.inProgress()
+                if (row != null) {
                     Log.i(TAG, "resuming recording after boot/replace")
-                    RecordingService.start(context)
+                    val useGps = ActivityType.fromName(row.typeName)?.gps == true
+                    RecordingService.start(context, useGps = useGps)
                 }
                 // Always nudge sync in case anything is pending.
                 SyncScheduler.enqueueOneShot(context)

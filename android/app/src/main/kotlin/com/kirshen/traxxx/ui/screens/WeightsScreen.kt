@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -20,8 +21,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +53,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import com.kirshen.traxxx.data.Prefs
 import com.kirshen.traxxx.net.CreateWeightDto
 import com.kirshen.traxxx.net.NetModule
+import com.kirshen.traxxx.net.UpdateWeightDto
 import com.kirshen.traxxx.net.WeightDto
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -72,13 +76,25 @@ fun WeightsScreen() {
     var dateInput by remember { mutableStateOf(DateFmt.format(Date())) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableIntStateOf(0) }
+    var page by remember { mutableIntStateOf(0) }
+    var editing by remember { mutableStateOf<WeightDto?>(null) }
+    val pageSize = 25
 
     LaunchedEffect(userId, reloadTick) {
         if (userId != null) {
-            entries = runCatching { NetModule.api(ctx).listWeights(userId) }
+            entries = runCatching { NetModule.api(ctx).listWeights(userId).items }
                 .getOrDefault(emptyList())
                 .sortedBy { it.date }
         }
+    }
+
+    val reversed = remember(entries) { entries.reversed() }
+    val totalPages = ((reversed.size + pageSize - 1) / pageSize).coerceAtLeast(1)
+    val safePage = page.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+    val pageEntries = remember(reversed, safePage) {
+        val start = safePage * pageSize
+        val end = (start + pageSize).coerceAtMost(reversed.size)
+        if (start < end) reversed.subList(start, end) else emptyList()
     }
 
     Column(
@@ -177,22 +193,120 @@ fun WeightsScreen() {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val start = safePage * pageSize + 1
+                val end = (safePage * pageSize + pageEntries.size)
+                Text(
+                    "Showing $start–$end of ${reversed.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = { if (safePage > 0) page = safePage - 1 },
+                    enabled = safePage > 0,
+                ) { Text("Prev") }
+                OutlinedButton(
+                    onClick = { if (safePage < totalPages - 1) page = safePage + 1 },
+                    enabled = safePage < totalPages - 1,
+                    modifier = Modifier.padding(start = 6.dp),
+                ) { Text("Next") }
+            }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(entries.reversed(), key = { it.id }) { w ->
-                    WeightRow(w, onDelete = {
-                        scope.launch {
-                            runCatching { NetModule.api(ctx).deleteWeight(w.id) }
-                            reloadTick++
-                        }
-                    })
+                items(pageEntries, key = { it.id }) { w ->
+                    WeightRow(
+                        w,
+                        onEdit = { editing = w },
+                        onDelete = {
+                            scope.launch {
+                                runCatching { NetModule.api(ctx).deleteWeight(w.id) }
+                                reloadTick++
+                            }
+                        },
+                    )
                 }
             }
         }
     }
+
+    editing?.let { target ->
+        EditWeightDialog(
+            initial = target,
+            onDismiss = { editing = null },
+            onSave = { kg, date ->
+                scope.launch {
+                    val ok = runCatching {
+                        NetModule.api(ctx).updateWeight(
+                            target.id,
+                            UpdateWeightDto(weightKg = kg, date = date),
+                        )
+                    }.isSuccess
+                    editing = null
+                    if (ok) reloadTick++
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun WeightRow(w: WeightDto, onDelete: () -> Unit) {
+private fun EditWeightDialog(
+    initial: WeightDto,
+    onDismiss: () -> Unit,
+    onSave: (Double, String) -> Unit,
+) {
+    val ctx = LocalContext.current
+    var kg by remember { mutableStateOf("%.1f".format(initial.weightKg)) }
+    var date by remember { mutableStateOf(initial.date) }
+    var err by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit entry") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = kg,
+                    onValueChange = { kg = it; err = null },
+                    label = { Text("Weight (kg)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                OutlinedButton(onClick = {
+                    val cal = Calendar.getInstance()
+                    runCatching { cal.time = DateFmt.parse(date)!! }
+                    DatePickerDialog(
+                        ctx,
+                        { _, y, m, d ->
+                            cal.set(y, m, d)
+                            date = DateFmt.format(cal.time)
+                        },
+                        cal.get(Calendar.YEAR),
+                        cal.get(Calendar.MONTH),
+                        cal.get(Calendar.DAY_OF_MONTH),
+                    ).show()
+                }) { Text("Date: $date") }
+                err?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val v = kg.replace(',', '.').toDoubleOrNull()
+                if (v == null || v <= 0) { err = "Enter a valid weight"; return@Button }
+                onSave(v, date)
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun WeightRow(w: WeightDto, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -205,6 +319,9 @@ private fun WeightRow(w: WeightDto, onDelete: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
             )
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Outlined.Edit, contentDescription = "Edit")
+            }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Outlined.Delete, contentDescription = "Delete",
                     tint = MaterialTheme.colorScheme.error)

@@ -21,6 +21,16 @@
 {{end}}
 </tbody>
 </table>
+
+<div class="pager" style="display:flex; align-items:center; justify-content:space-between; margin-top:12px; gap:10px;">
+  <span class="muted">
+    {{if .Total}}Showing {{.PageFrom}}–{{.PageTo}} of {{.Total}}{{else}}&nbsp;{{end}}
+  </span>
+  <span style="display:flex; gap:8px;">
+    {{if .HasPrev}}<a href="/ui/activities?page={{.PrevPage}}">&larr; Prev</a>{{end}}
+    {{if .HasNext}}<a href="/ui/activities?page={{.NextPage}}">Next &rarr;</a>{{end}}
+  </span>
+</div>
 {{else}}
 <p class="muted">No activities yet. Run <code>./server -seed</code> to populate sample data.</p>
 {{end}}
